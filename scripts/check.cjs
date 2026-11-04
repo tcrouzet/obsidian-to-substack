@@ -33,6 +33,7 @@ assert.equal(lock.packages[''].version, manifest.version);
 assert.equal(versions[manifest.version], manifest.minAppVersion);
 
 class Plugin {}
+class PluginSettingTab {}
 const pluginModule = { exports: {} };
 runInNewContext(buildSync({
 	entryPoints: ['plugin/main.ts'], bundle: true, write: false, format: 'cjs', external: ['obsidian']
@@ -41,10 +42,16 @@ runInNewContext(buildSync({
 	exports: pluginModule.exports,
 	require: name => {
 		assert.equal(name, 'obsidian');
-		return { Plugin };
+		return { Plugin, PluginSettingTab, Modal: class {} };
 	}
 });
 assert.ok(new pluginModule.exports.default() instanceof Plugin);
 console.log('Source lint, version consistency and plugin export: pass.');
+require('./check-i18n.cjs');
 
-require('./check-release.cjs');
+require('./check-substack.cjs').then(() => {
+	require('./check-release.cjs');
+}).catch(error => {
+	console.error(error);
+	process.exitCode = 1;
+});
