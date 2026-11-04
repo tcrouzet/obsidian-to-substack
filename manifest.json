@@ -1,0 +1,11 @@
+{
+  "id": "obsidian-to-substack",
+  "name": "To Substack",
+  "version": "0.0.1",
+  "minAppVersion": "1.14.0",
+  "description": "Publish Obsidian notes on Substack.",
+  "author": "Thierry Crouzet",
+  "authorUrl": "https://tcrouzet.com",
+  "fundingUrl": "https://www.paypal.com/donate/?business=MCZTJGYPGXXCW&no_recurring=0&currency_code=EUR",
+  "isDesktopOnly": false
+}

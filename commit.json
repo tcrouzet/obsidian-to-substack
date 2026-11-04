@@ -1,0 +1,7 @@
+{
+  "id": "obsidian-to-substack",
+  "name": "To Substack",
+  "author": "Thierry Crouzet",
+  "description": "Publish Obsidian notes on Substack.",
+  "repo": "tcrouzet/obsidian-to-substack"
+}
