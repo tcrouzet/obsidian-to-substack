@@ -98,7 +98,7 @@ function blocks(parent: Element): PostNode[] {
 
 export async function preparePost(app: App, file: TFile): Promise<PostContent> {
 	const markdown = await app.vault.read(file);
-	const container = createEl('div');
+	const container = createDiv();
 	const component = new Component();
 	component.load();
 	try {
