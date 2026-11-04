@@ -4,7 +4,7 @@
 
 Write in Obsidian, choose your newsletter, and create a Substack draft with your title, subtitle, formatted text, and images. Open the draft in Substack to review it and publish when you are ready. Your original note and attachments stay unchanged.
 
-[Install To Substack from Obsidian](https://community.obsidian.md/plugins/obsidian-to-substack) · [Report an issue](https://github.com/tcrouzet/obsidian-to-substack/issues)
+[Install To Substack from Obsidian](https://community.obsidian.md/plugins/to-substack) · [Report an issue](https://github.com/tcrouzet/obsidian-to-substack/issues)
 
 ## Install To Substack
 
@@ -103,8 +103,8 @@ Close Obsidian, replace `/path/to/My vault` with your vault's path, and run:
       -o "$download_dir/$file"
   done
 
-  mkdir -p plugins/obsidian-to-substack
-  cp "$download_dir/"* plugins/obsidian-to-substack/
+  mkdir -p plugins/to-substack
+  cp "$download_dir/"* plugins/to-substack/
 )
 ```
 
@@ -115,7 +115,7 @@ Reopen Obsidian and enable **To Substack** in **Settings → Community plugins**
 ## Install manually
 
 1. Open the [latest release](https://github.com/tcrouzet/obsidian-to-substack/releases/latest) and download `main.js`, `manifest.json`, and `styles.css`.
-2. Create `.obsidian/plugins/obsidian-to-substack/` inside your vault and place those files in it.
+2. Create `.obsidian/plugins/to-substack/` inside your vault and place those files in it.
 3. Restart Obsidian and enable **To Substack** in **Settings → Community plugins**.
 
 On macOS, press `Cmd+Shift+.` in Finder to show hidden folders. If you use a custom configuration folder, replace `.obsidian` with its name.

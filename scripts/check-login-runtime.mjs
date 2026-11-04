@@ -13,7 +13,7 @@ assert.ok(archives.length, 'An installed Obsidian archive is required');
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'to-substack-settings-'));
 const profile = path.join(root, 'profile');
 const vault = path.join(root, 'vault');
-const destination = path.join(vault, '.obsidian/plugins/obsidian-to-substack');
+const destination = path.join(vault, '.obsidian/plugins/to-substack');
 await fs.mkdir(destination, { recursive: true });
 await fs.mkdir(profile);
 for (const name of ['manifest.json', 'styles.css']) await fs.copyFile(name, path.join(destination, name));
@@ -53,7 +53,7 @@ const fixtureApi = { ...host, requestUrl: async options => {
 `;
 const requireFixture = 'name => name === "obsidian" ? fixtureApi : hostRequire(name)';
 await fs.writeFile(path.join(destination, 'main.js'), prefix + bundle + `\n})(${requireFixture}, module, exports);\nconst postCheckModule = { exports: {} };\n(function(require, module, exports) {\n` + postBundle + `\n})(${requireFixture}, postCheckModule, postCheckModule.exports);\npostCheckModule.exports.setLocale(host.getLanguage());\nglobalThis.toSubstackPreparePost = postCheckModule.exports.preparePost;\nglobalThis.toSubstackUiCheck = postCheckModule.exports;\n`);
-await fs.writeFile(path.join(vault, '.obsidian/community-plugins.json'), '["obsidian-to-substack"]');
+await fs.writeFile(path.join(vault, '.obsidian/community-plugins.json'), '["to-substack"]');
 await fs.writeFile(path.join(vault, '.obsidian/core-plugins.json'), '["file-explorer"]');
 await fs.writeFile(path.join(vault, '.obsidian/app.json'), '{}');
 await fs.writeFile(path.join(vault, 'Test.md'), '---\ntitle: Ignorer les propriétés\n---\n# Un titre **en gras**\n\n*Un chapeau avec [un lien](https://example.org).*\n\nPremier paragraphe **gras** et *italique*.\n\n## Une section\n\n- Une entrée\n- Une autre\n\n> Une citation\n');
@@ -130,13 +130,13 @@ try {
  })()`), 'Trust dialog for the fixture vault');
  await main.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...trustPoint, button: 'left', clickCount: 1 });
  await main.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...trustPoint, button: 'left', clickCount: 1 });
- await poll(() => main.evaluate(`!document.querySelector('.modal') && Boolean(app.plugins.getPlugin('obsidian-to-substack'))`), 'Fixture plugin enabled through vault trust');
+ await poll(() => main.evaluate(`!document.querySelector('.modal') && Boolean(app.plugins.getPlugin('to-substack'))`), 'Fixture plugin enabled through vault trust');
  const initial = await main.evaluate(`(async () => {
   if (!app.plugins.isEnabled()) await app.plugins.setEnable(true);
-  if (!app.plugins.getPlugin('obsidian-to-substack')) await app.plugins.loadPlugin('obsidian-to-substack');
-  const plugin = app.plugins.getPlugin('obsidian-to-substack');
+  if (!app.plugins.getPlugin('to-substack')) await app.plugins.loadPlugin('to-substack');
+  const plugin = app.plugins.getPlugin('to-substack');
   if (!plugin) throw Error('Plugin did not load');
-  app.setting.open(); app.setting.openTabById('obsidian-to-substack');
+  app.setting.open(); app.setting.openTabById('to-substack');
   const electron = window.require('electron');
   return { connected: plugin.account !== null, browserWindowAvailable: typeof (electron.remote ?? electron).BrowserWindow === 'function' };
  })()`);
@@ -145,7 +145,7 @@ try {
  await poll(async () => {
   for (const page of (await pages()).filter(page => page.type === 'page')) {
    const connection = await connect(page);
-   if (await connection.evaluate(`Boolean(document.querySelector('.vertical-tab-nav-item[data-setting-id="obsidian-to-substack"]'))`)) { settings = connection; return true; }
+   if (await connection.evaluate(`Boolean(document.querySelector('.vertical-tab-nav-item[data-setting-id="to-substack"]'))`)) { settings = connection; return true; }
   }
  }, 'Settings page');
  const text = () => settings.evaluate(`document.body.textContent`);
@@ -162,7 +162,7 @@ try {
   const remote = electron.remote ?? electron;
   remote.app.focus({ steal: true });
   for (const win of remote.BrowserWindow.getAllWindows()) {
-   if (await win.webContents.executeJavaScript(${JSON.stringify("Boolean(document.querySelector('.vertical-tab-nav-item[data-setting-id=\"obsidian-to-substack\"]'))")})) {
+   if (await win.webContents.executeJavaScript(${JSON.stringify("Boolean(document.querySelector('.vertical-tab-nav-item[data-setting-id=\"to-substack\"]'))")})) {
     globalThis.toSubstackSettingsWindowId = win.id;
     win.show(); win.focus();
     return;
@@ -172,30 +172,30 @@ try {
  })()`);
  await poll(() => main.evaluate(`(() => { const electron = window.require('electron'); return (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId)?.isFocused(); })()`), 'Settings window focused before login');
  await clickButton('Se connecter');
- await poll(() => main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').busy`), 'Login operation');
+ await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack').busy`), 'Login operation');
  const sandbox = await main.evaluate(`(() => {
   const electron = window.require('electron');
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
   if (!login) throw Error('Login window missing');
   const preferences = login.webContents.getLastWebPreferences();
   return { sandbox: preferences.sandbox, nodeIntegration: preferences.nodeIntegration, contextIsolation: preferences.contextIsolation, persistent: login.webContents.session.isPersistent() };
  })()`);
  assert.deepEqual(sandbox, { sandbox: true, nodeIntegration: false, contextIsolation: true, persistent: false });
  const redirectTarget = 'https://substack.com/sign-in?to-substack-navigation-check=1';
- await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.webContents.executeJavaScript(${JSON.stringify(`
+ await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.webContents.executeJavaScript(${JSON.stringify(`
   globalThis.toSubstackExternalAttempt = false;
   window.addEventListener('open-url', event => { globalThis.toSubstackExternalAttempt = true; event.preventDefault(); });
   location.assign(${JSON.stringify(redirectTarget)});
   true;
  `)})`);
  const navigationResult = await poll(() => main.evaluate(`(async () => {
-  const contents = app.plugins.getPlugin('obsidian-to-substack').login.authWindow.webContents;
+  const contents = app.plugins.getPlugin('to-substack').login.authWindow.webContents;
   if (contents.getURL() === ${JSON.stringify(redirectTarget)}) return 'internal';
   return await contents.executeJavaScript('Boolean(globalThis.toSubstackExternalAttempt)') ? 'external' : null;
  })()`), 'Post-verification redirect');
  assert.equal(navigationResult, 'internal', 'Substack page navigation must stay in the login window rather than invoke the external browser');
  const blockedNavigationCodes = await main.evaluate(`(async () => {
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
   const errors = [];
   for (const url of ['http://substack.com/', 'https://substack.com.attacker.invalid/']) {
    try { await login.loadURL(url); errors.push('allowed'); }
@@ -205,9 +205,9 @@ try {
   return errors;
  })()`);
  assert.deepEqual(blockedNavigationCodes, ['ERR_BLOCKED_BY_CLIENT', 'ERR_BLOCKED_BY_CLIENT'], 'The isolated session must reject insecure and foreign main-frame requests');
- assert.equal(await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.webContents.executeJavaScript('window.open("https://substack.com/sign-in?to-substack-popup-check=1") === null')`), true, 'Popup requests must be denied synchronously without opening the system browser');
+ assert.equal(await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.webContents.executeJavaScript('window.open("https://substack.com/sign-in?to-substack-popup-check=1") === null')`), true, 'Popup requests must be denied synchronously without opening the system browser');
  assert.equal(await main.evaluate(`(() => {
-  const plugin = app.plugins.getPlugin('obsidian-to-substack');
+  const plugin = app.plugins.getPlugin('to-substack');
   return plugin.login.authWindow.getParentWindow()?.id === globalThis.toSubstackSettingsWindowId;
  })()`), true, 'The login window must be a child of the settings window');
 
@@ -215,10 +215,10 @@ try {
   const button = [...document.querySelectorAll('button')].find(node => node.textContent.trim() === 'Revenir à la connexion');
   return !!button && !button.disabled;
  })()`), true, 'The pending login must offer an enabled return button');
- await main.evaluate(`(() => { const plugin = app.plugins.getPlugin('obsidian-to-substack'); const focus = plugin.login.focus.bind(plugin.login); plugin.login.focus = () => { globalThis.toSubstackFocusCalls = (globalThis.toSubstackFocusCalls || 0) + 1; focus(); }; })()`);
+ await main.evaluate(`(() => { const plugin = app.plugins.getPlugin('to-substack'); const focus = plugin.login.focus.bind(plugin.login); plugin.login.focus = () => { globalThis.toSubstackFocusCalls = (globalThis.toSubstackFocusCalls || 0) + 1; focus(); }; })()`);
  const originalLoginId = await main.evaluate(`(() => {
   const electron = window.require('electron');
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
   login.minimize();
   return login.id;
  })()`);
@@ -237,34 +237,34 @@ try {
 
  await main.evaluate(`(async () => {
   const electron = window.require('electron');
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
   await login.webContents.session.cookies.set({ url: 'https://substack.com', name: 'substack.sid', value: 'fixture-before-email-code', secure: true, httpOnly: true });
  })()`);
  await poll(() => main.evaluate(`globalThis.toSubstackTestRequests.length > 0`), 'Pre-authentication cookie checked');
  assert.equal(await main.evaluate(`(() => {
   const electron = window.require('electron');
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
-  return !!login && app.plugins.getPlugin('obsidian-to-substack').busy;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
+  return !!login && app.plugins.getPlugin('to-substack').busy;
  })()`), true, 'A pre-authentication cookie must not close the login window');
- await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.webContents.executeJavaScript('window.onbeforeunload = () => false; true')`);
+ await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.webContents.executeJavaScript('window.onbeforeunload = () => false; true')`);
  const beforeVerifiedCookie = await main.evaluate(`globalThis.toSubstackTestRequests.length`);
  await main.evaluate(`(async () => {
   const electron = window.require('electron');
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
   await login.webContents.session.cookies.set({ url: 'https://substack.com', name: 'substack.sid', value: 'fixture-desktop-session', secure: true, httpOnly: true });
  })()`);
  await poll(() => main.evaluate(`globalThis.toSubstackTestRequests.length > ${beforeVerifiedCookie}`), 'Cookie checked before SPA navigation');
- assert.equal(await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').hasLoginWindow`), true);
+ assert.equal(await main.evaluate(`app.plugins.getPlugin('to-substack').hasLoginWindow`), true);
  await main.evaluate(`globalThis.toSubstackTestDenied = false`);
- await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.webContents.executeJavaScript('history.pushState({}, "", "/home"); true')`);
- await poll(() => main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').account?.newsletters.length === 2`), 'Captured session and newsletters');
+ await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.webContents.executeJavaScript('history.pushState({}, "", "/home"); true')`);
+ await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack').account?.newsletters.length === 2`), 'Captured session and newsletters');
  assert.equal(await main.evaluate(`(() => { const electron = window.require('electron'); return !!(electron.remote ?? electron).BrowserWindow.fromId(${originalLoginId}); })()`), false, 'Completed login must close even when the page refuses unload');
  await poll(() => main.evaluate(`(() => { const electron = window.require('electron'); return (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId)?.isFocused(); })()`), 'Return to the settings window after authentication');
  await poll(async () => (await text()).includes('Deuxième newsletter'), 'Newsletter settings rendering');
  assert.ok((await text()).includes('Newsletter principale'));
  assert.equal((await text()).includes('fixture-desktop-session'), false);
  const saved = await main.evaluate(`(async () => {
-  const plugin = app.plugins.getPlugin('obsidian-to-substack');
+  const plugin = app.plugins.getPlugin('to-substack');
   const saved = await plugin.loadData();
   return { keys: Object.keys(saved), reference: saved.sessionSecretId, stored: globalThis.toSubstackValidatedSessions.includes(app.secretStorage.getSecret(saved.sessionSecretId)), cookieNames: (app.secretStorage.getSecret(saved.sessionSecretId) || '').split(';').map(part => part.trim().split('=')[0]) };
  })()`);
@@ -282,51 +282,51 @@ try {
  await clickButton('Se déconnecter');
  await poll(async () => (await text()).includes('Connectez-vous pour charger vos newsletters') && !(await text()).includes('Deuxième newsletter'), 'Disconnect rendering');
  assert.equal(await main.evaluate(`app.secretStorage.getSecret('obsidian-to-substack-session')`), '');
- assert.equal(await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').settings.sessionSecretId`), '');
+ assert.equal(await main.evaluate(`app.plugins.getPlugin('to-substack').settings.sessionSecretId`), '');
  await main.evaluate(`globalThis.toSubstackTestDenied = true`);
  await clickButton('Se connecter');
- const quietLoginId = await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.id`);
- await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.loadURL('about:blank')`);
+ const quietLoginId = await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.id`);
+ await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.loadURL('about:blank')`);
  const beforeQuietCookie = await main.evaluate(`globalThis.toSubstackTestRequests.length`);
- await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.webContents.session.cookies.set({ url: 'https://substack.com', name: 'substack.sid', value: 'fixture-desktop-session', secure: true, httpOnly: true })`);
+ await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.webContents.session.cookies.set({ url: 'https://substack.com', name: 'substack.sid', value: 'fixture-desktop-session', secure: true, httpOnly: true })`);
  await poll(() => main.evaluate(`globalThis.toSubstackTestRequests.length > ${beforeQuietCookie}`), 'Session rejected before server-side authentication');
- assert.equal(await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').hasLoginWindow`), true);
+ assert.equal(await main.evaluate(`app.plugins.getPlugin('to-substack').hasLoginWindow`), true);
  await main.evaluate(`(() => {
   const electron = window.require('electron');
   (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId).hide();
   globalThis.toSubstackTestDenied = false;
  })()`);
- await poll(() => main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').account?.newsletters.length === 2`), 'Automatic return without navigation or cookie change');
+ await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack').account?.newsletters.length === 2`), 'Automatic return without navigation or cookie change');
  assert.equal(await main.evaluate(`(() => { const electron = window.require('electron'); return !!(electron.remote ?? electron).BrowserWindow.fromId(${quietLoginId}); })()`), false);
  await poll(() => main.evaluate(`(() => { const electron = window.require('electron'); const settingsWindow = (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId); return settingsWindow.isVisible() && settingsWindow.isFocused(); })()`), 'Hidden settings restored automatically');
  await clickButton('Se déconnecter');
- await poll(() => main.evaluate(`!app.plugins.getPlugin('obsidian-to-substack').settings.sessionSecretId`), 'Quiet authentication disconnected');
+ await poll(() => main.evaluate(`!app.plugins.getPlugin('to-substack').settings.sessionSecretId`), 'Quiet authentication disconnected');
  await main.evaluate(`globalThis.toSubstackTestPending = true`);
  await clickButton('Se connecter');
- const cancelledLoginId = await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').login.authWindow.id`);
+ const cancelledLoginId = await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.id`);
  await main.evaluate(`(async () => {
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
   await login.webContents.executeJavaScript('window.onbeforeunload = () => false; true');
   await login.webContents.session.cookies.set({ url: 'https://substack.com', name: 'substack.sid', value: 'fixture-desktop-session', secure: true, httpOnly: true });
  })()`);
  await poll(() => main.evaluate(`globalThis.toSubstackPendingResponses.length > 0`), 'Pending account request');
  await clickButton('Annuler');
- await poll(() => main.evaluate(`!app.plugins.getPlugin('obsidian-to-substack').busy`), 'Cancelled login');
+ await poll(() => main.evaluate(`!app.plugins.getPlugin('to-substack').busy`), 'Cancelled login');
  assert.equal(await main.evaluate(`(() => { const electron = window.require('electron'); return !!(electron.remote ?? electron).BrowserWindow.fromId(${cancelledLoginId}); })()`), false, 'Cancel must destroy the window despite beforeunload');
  await main.evaluate(`globalThis.toSubstackTestPending = false; globalThis.toSubstackPendingResponses.splice(0).forEach(resolve => resolve());`);
- await poll(() => main.evaluate(`!app.plugins.getPlugin('obsidian-to-substack').hasLoginWindow`), 'No remaining login window');
- assert.equal(await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').account`), null);
- assert.equal(await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').settings.sessionSecretId`), '');
+ await poll(() => main.evaluate(`!app.plugins.getPlugin('to-substack').hasLoginWindow`), 'No remaining login window');
+ assert.equal(await main.evaluate(`app.plugins.getPlugin('to-substack').account`), null);
+ assert.equal(await main.evaluate(`app.plugins.getPlugin('to-substack').settings.sessionSecretId`), '');
  await clickButton('Se connecter');
- await poll(() => main.evaluate(`app.plugins.getPlugin('obsidian-to-substack').hasLoginWindow`), 'Retry after cancellation');
+ await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack').hasLoginWindow`), 'Retry after cancellation');
  await main.evaluate(`(async () => {
-  const login = app.plugins.getPlugin('obsidian-to-substack').login.authWindow;
+  const login = app.plugins.getPlugin('to-substack').login.authWindow;
   await login.webContents.executeJavaScript('window.onbeforeunload = () => false; true');
   login.close();
  })()`);
- await poll(() => main.evaluate(`!app.plugins.getPlugin('obsidian-to-substack').busy && !app.plugins.getPlugin('obsidian-to-substack').hasLoginWindow`), 'Native close despite beforeunload');
+ await poll(() => main.evaluate(`!app.plugins.getPlugin('to-substack').busy && !app.plugins.getPlugin('to-substack').hasLoginWindow`), 'Native close despite beforeunload');
  const otherTab = await settings.evaluate(`(() => {
-  const tab = [...document.querySelectorAll('.vertical-tab-nav-item[data-setting-id]')].find(node => node.dataset.settingId !== 'obsidian-to-substack');
+  const tab = [...document.querySelectorAll('.vertical-tab-nav-item[data-setting-id]')].find(node => node.dataset.settingId !== 'to-substack');
   const box = tab.getBoundingClientRect();
   return { id: tab.dataset.settingId, x: box.x + box.width / 2, y: box.y + box.height / 2 };
  })()`);
@@ -336,7 +336,7 @@ try {
  await main.evaluate(`(() => { const electron = window.require('electron'); (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId).close(); })()`);
  await poll(() => main.evaluate(`(() => { const electron = window.require('electron'); return !(electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId); })()`), 'Settings window remains closable');
  await main.evaluate(`(async () => {
-  const plugin = app.plugins.getPlugin('obsidian-to-substack');
+  const plugin = app.plugins.getPlugin('to-substack');
   app.secretStorage.setSecret('obsidian-to-substack-session', globalThis.toSubstackValidatedSessions[0]);
   plugin.settings.sessionSecretId = 'obsidian-to-substack-session';
   await plugin.connect(false);
@@ -451,7 +451,7 @@ try {
  const englishSettings = await main.evaluate(`(() => {
   const ui = globalThis.toSubstackUiCheck;
   ui.setLocale('en');
-  const plugin = app.plugins.getPlugin('obsidian-to-substack');
+  const plugin = app.plugins.getPlugin('to-substack');
   const definitions = new ui.SubstackSettingTab(app, plugin).getSettingDefinitions();
   new ui.PostModal(plugin, app.vault.getFileByPath('Test.md')).open();
   return { headings: definitions.map(group => group.heading), status: definitions[0].items[0].name };
@@ -476,11 +476,11 @@ try {
   console.error('PAGE', JSON.stringify({ url: page.url, info: await connection.evaluate(`({ text: document.body.textContent.slice(-2200), selects: [...document.querySelectorAll('select')].map(node => ({ html: node.outerHTML, display: getComputedStyle(node).display, active: node === document.activeElement })) })`).catch(() => null) }));
  }
  if (main) console.error('EXPLORER', JSON.stringify(await main.evaluate(`({ events: globalThis.toSubstackExplorerEvents, menuTitles: [...document.querySelectorAll('.menu-item-title')].map(node => node.textContent), modals: [...document.querySelectorAll('.modal')].map(node => node.textContent) })`).catch(() => null)));
- if (main) console.error('STATE', JSON.stringify(await main.evaluate(`(() => { const plugin = app.plugins.getPlugin('obsidian-to-substack'); const electron = window.require('electron'); return { activity: plugin?.activity, error: plugin?.error, accountLoaded: !!plugin?.account, focusCalls: globalThis.toSubstackFocusCalls || 0, windows: (electron.remote ?? electron).BrowserWindow.getAllWindows().map(win => ({id: win.id, title: win.getTitle(), visible: win.isVisible(), minimized: win.isMinimized(), focused: win.isFocused()})) }; })()`)));
+ if (main) console.error('STATE', JSON.stringify(await main.evaluate(`(() => { const plugin = app.plugins.getPlugin('to-substack'); const electron = window.require('electron'); return { activity: plugin?.activity, error: plugin?.error, accountLoaded: !!plugin?.account, focusCalls: globalThis.toSubstackFocusCalls || 0, windows: (electron.remote ?? electron).BrowserWindow.getAllWindows().map(win => ({id: win.id, title: win.getTitle(), visible: win.isVisible(), minimized: win.isMinimized(), focused: win.isFocused()})) }; })()`)));
  console.error(stderr.slice(-1600));
  process.exitCode = 1;
 } finally {
- if (main) { try { await main.evaluate(`app.plugins.getPlugin('obsidian-to-substack')?.cancelConnection()`); } catch {} }
+ if (main) { try { await main.evaluate(`app.plugins.getPlugin('to-substack')?.cancelConnection()`); } catch {} }
  for (const { socket } of sockets.values()) socket.close();
  child.kill();
  await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 4000))]);
