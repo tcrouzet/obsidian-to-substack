@@ -127,7 +127,7 @@ export class SubstackLogin {
 			const finish = (result: LoginResult | null, error?: SubstackError): void => {
 				if (finished) return;
 				finished = true;
-				clearInterval(interval);
+				window.clearInterval(interval);
 				cookies.removeListener('changed', cookieChanged);
 				if (this.authWindow === authWindow) this.authWindow = null;
 				// Only the disposable login window is destroyed; the page cannot veto its dismissal.
@@ -166,7 +166,7 @@ export class SubstackLogin {
 				if (cookie.name === 'substack.sid') checkCookies();
 			};
 			// Authentication can complete on the server without another cookie or navigation event.
-			const interval = setInterval(checkCookies, 2000);
+			const interval = window.setInterval(checkCookies, 2000);
 			cookies.on('changed', cookieChanged);
 			authWindow.on('closed', () => finish(null));
 			authWindow.webContents.on('will-prevent-unload', () => finish(null));

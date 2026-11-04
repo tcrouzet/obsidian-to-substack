@@ -39,13 +39,15 @@ module.exports = (async () => {
 		module: moduleForCheck,
 		exports: moduleForCheck.exports,
 		URL,
-		setTimeout: (callback, delay) => {
-			assert.equal(delay, 15000);
-			const id = ++timerId;
-			timers.set(id, callback);
-			return id;
+		window: {
+			setTimeout: (callback, delay) => {
+				assert.equal(delay, 15000);
+				const id = ++timerId;
+				timers.set(id, callback);
+				return id;
+			},
+			clearTimeout: id => timers.delete(id)
 		},
-		clearTimeout: id => timers.delete(id),
 		require: name => {
 			assert.equal(name, 'obsidian');
 			return { Plugin, PluginSettingTab, Modal: class {}, Notice: class {}, getLanguage: () => language, Platform: { isDesktopApp: false }, requestUrl: async request => {
@@ -69,6 +71,8 @@ module.exports = (async () => {
 	for (const input of ['', 'substack.sid=', 'substack.sid=token\r\nOther: value', 'invalid session', 'other=value; bad']) {
 		assert.throws(() => normalizeSession(input), /session Substack/);
 	}
+	for (let code = 0; code < 32; code++) assert.throws(() => normalizeSession(`token${String.fromCharCode(code)}value`), /session Substack/);
+	assert.throws(() => normalizeSession(`token${String.fromCharCode(127)}value`), /session Substack/);
 	const account = parseAccount(profile);
 	assert.equal(account.name, profile.name);
 	assert.equal(account.newsletters.map(item => item.subdomain).join(','), 'premiere,deuxieme');

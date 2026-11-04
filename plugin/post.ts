@@ -36,7 +36,7 @@ async function encodeImages(app: App, file: TFile, container: HTMLElement): Prom
 		return data;
 	};
 	for (const embed of Array.from(container.querySelectorAll<HTMLElement>('.internal-embed'))) {
-		const image = document.createElement('img');
+		const image = createEl('img');
 		image.src = await encode(embed.getAttribute('src') || '');
 		image.alt = embed.getAttribute('alt') || '';
 		embed.replaceWith(image);
@@ -46,7 +46,7 @@ async function encodeImages(app: App, file: TFile, container: HTMLElement): Prom
 
 function inline(node: Node, marks: NonNullable<PostNode['marks']> = []): PostNode[] {
 	if (node.nodeType === Node.TEXT_NODE) return node.textContent ? [{ type: 'text', text: node.textContent, ...(marks.length ? { marks } : {}) }] : [];
-	if (!(node instanceof HTMLElement)) return [];
+	if (!node.instanceOf(HTMLElement)) return [];
 	if (node.tagName === 'BR') return [{ type: 'hardBreak' }];
 	if (node.tagName === 'IMG') {
 		const src = node.getAttribute('src') || '';
@@ -70,7 +70,7 @@ function blocks(parent: Element): PostNode[] {
 		pending = [];
 	};
 	for (const child of Array.from(parent.childNodes)) {
-		if (!(child instanceof HTMLElement)) { pending.push(...inline(child)); continue; }
+		if (!child.instanceOf(HTMLElement)) { pending.push(...inline(child)); continue; }
 		const tag = child.tagName;
 		if (tag === 'IMG') { flush(); result.push(...inline(child)); }
 		else if (tag === 'P') {
@@ -98,7 +98,7 @@ function blocks(parent: Element): PostNode[] {
 
 export async function preparePost(app: App, file: TFile): Promise<PostContent> {
 	const markdown = await app.vault.read(file);
-	const container = document.createElement('div');
+	const container = createEl('div');
 	const component = new Component();
 	component.load();
 	try {

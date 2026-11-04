@@ -18,7 +18,11 @@ for (const file of parsed.fileNames) {
 	assert.deepEqual(linter.verify(readFileSync(file, 'utf8'), {
 		parser: '@typescript-eslint/parser',
 		parserOptions: { ecmaVersion: 2020, sourceType: 'module', programs: [program], tsconfigRootDir: process.cwd() },
-		rules: Object.fromEntries(ruleNames.map(name => ['@typescript-eslint/' + name, 'error']))
+		rules: {
+			...Object.fromEntries(ruleNames.map(name => ['@typescript-eslint/' + name, 'error'])),
+			'no-control-regex': 'error',
+			'no-restricted-globals': ['error', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval']
+		}
 	}, file), []);
 }
 

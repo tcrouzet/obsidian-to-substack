@@ -18,7 +18,7 @@ await fs.mkdir(destination, { recursive: true });
 await fs.mkdir(profile);
 for (const name of ['manifest.json', 'styles.css']) await fs.copyFile(name, path.join(destination, name));
 const bundle = await fs.readFile('main.js', 'utf8');
-const postBundle = buildSync({ stdin: { contents: "export * from './plugin/post'; export * from './plugin/i18n'; export * from './plugin/settings';", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'cjs', external: ['obsidian'] }).outputFiles[0].text;
+const postBundle = buildSync({ stdin: { contents: "export * from './plugin/post'; export * from './plugin/i18n'; export * from './plugin/settings'; export { MarkdownPreviewRenderer } from 'obsidian';", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'cjs', external: ['obsidian'] }).outputFiles[0].text;
 const prefix = `const hostRequire = require;
 const host = hostRequire('obsidian');
 globalThis.toSubstackTestRequests = [];
@@ -448,6 +448,29 @@ try {
  })()`);
  assert.match(missingImage, /introuvable/);
  assert.equal(await main.evaluate(`globalThis.toSubstackDrafts.length`), 1);
+ const popoutPost = await main.evaluate(`(async () => {
+  const { MarkdownPreviewRenderer } = globalThis.toSubstackUiCheck;
+  const leaf = app.workspace.openPopoutLeaf();
+  let processor;
+  try {
+   await leaf.openFile(app.vault.getFileByPath('Sans titre.md'));
+   const paragraph = leaf.view.containerEl.doc.createElement('p');
+   paragraph.appendText('Popout ');
+   paragraph.createEl('strong', { text: 'content' });
+   const differentWindow = !(paragraph instanceof HTMLElement);
+   const file = await app.vault.create('Popout.md', 'Render the cross-window paragraph.');
+   processor = app.plugins.getPlugin('to-substack').registerMarkdownPostProcessor((element, context) => {
+    if (context.sourcePath === file.path) element.replaceChildren(paragraph);
+   });
+   return { differentWindow, post: await globalThis.toSubstackPreparePost(app, file) };
+  } finally {
+   if (processor) MarkdownPreviewRenderer.unregisterPostProcessor(processor);
+   leaf.detach();
+  }
+ })()`);
+ assert.equal(popoutPost.differentWindow, true, 'The paragraph must belong to a real popout window');
+ assert.equal(popoutPost.post.body.content[0].content.map(node => node.text || '').join(''), 'Popout content');
+ assert.ok(popoutPost.post.body.content[0].content.some(node => node.text === 'content' && node.marks.some(mark => mark.type === 'strong')));
  const englishSettings = await main.evaluate(`(() => {
   const ui = globalThis.toSubstackUiCheck;
   ui.setLocale('en');

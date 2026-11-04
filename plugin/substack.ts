@@ -33,7 +33,7 @@ export class SubstackError extends Error {
 
 export function normalizeSession(value: string): string {
 	const session = value.trim().replace(/^cookie:\s*/i, '');
-	if (!session || /[\x00-\x1f\x7f]/.test(session)) {
+	if (!session || Array.from(session).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
 		throw new SubstackError(t('emptySession'));
 	}
 	if (session.split(';').some(part => part.trim().startsWith('substack.sid='))) {
@@ -75,21 +75,21 @@ export function parseAccount(value: unknown): SubstackAccount {
 async function request(session: string, options: RequestUrlParam): Promise<unknown> {
 	const cookie = normalizeSession(session);
 	let response;
-	let timeout: ReturnType<typeof setTimeout> | undefined;
+	let timeout: number | undefined;
 	try {
 		response = await Promise.race([requestUrl({
 			...options,
 			headers: { 'Content-Type': 'application/json', ...options.headers, Cookie: cookie },
 			throw: false
 		}), new Promise<never>((_resolve, reject) => {
-			timeout = setTimeout(() => reject(new SubstackError(options.method === 'POST' ? t('draftCreationUncertain') : t('substackTimeout'))), 15000);
+			timeout = window.setTimeout(() => reject(new SubstackError(options.method === 'POST' ? t('draftCreationUncertain') : t('substackTimeout'))), 15000);
 		})]);
 	} catch (error) {
 		if (error instanceof SubstackError) throw error;
 		if (options.method === 'POST') throw new SubstackError(t('draftCreationUncertain'));
 		throw new SubstackError(t('substackConnectionFailed'));
 	} finally {
-		if (timeout !== undefined) clearTimeout(timeout);
+		if (timeout !== undefined) window.clearTimeout(timeout);
 	}
 	if (response.status === 401 || response.status === 403) {
 		if (options.method === 'POST' && response.status === 403) throw new SubstackError(t('draftPermissionDenied'), response.status);
