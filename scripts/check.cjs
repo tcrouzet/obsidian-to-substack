@@ -26,6 +26,7 @@ const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
 const versions = JSON.parse(readFileSync('versions.json', 'utf8'));
+assert.ok(readFileSync('styles.css').length > 0, 'styles.css must not be empty: GitHub rejects empty release assets');
 assert.match(manifest.id, /^[a-z-]+$/);
 assert.ok(!manifest.id.includes('obsidian'), 'Plugin ID must not contain obsidian');
 assert.ok(!manifest.id.endsWith('plugin'), 'Plugin ID must not end with plugin');
