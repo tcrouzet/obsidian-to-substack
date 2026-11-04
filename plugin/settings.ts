@@ -3,7 +3,7 @@ import { App, Platform, PluginSettingTab, SettingDefinitionItem } from 'obsidian
 import type ToSubstackPlugin from './main';
 
 export class SubstackSettingTab extends PluginSettingTab {
-	override icon = 'send';
+	override icon = 'to-substack';
 	plugin: ToSubstackPlugin;
 
 	constructor(app: App, plugin: ToSubstackPlugin) {

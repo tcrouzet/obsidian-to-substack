@@ -18,6 +18,7 @@ await fs.mkdir(destination, { recursive: true });
 await fs.mkdir(profile);
 for (const name of ['manifest.json', 'styles.css']) await fs.copyFile(name, path.join(destination, name));
 const bundle = await fs.readFile('main.js', 'utf8');
+const iconPath = (await fs.readFile('icon.svg', 'utf8')).match(/<path d="([^"]+)"/)[1];
 const postBundle = buildSync({ stdin: { contents: "export * from './plugin/post'; export * from './plugin/i18n'; export * from './plugin/settings'; export { MarkdownPreviewRenderer } from 'obsidian';", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'cjs', external: ['obsidian'] }).outputFiles[0].text;
 const prefix = `const hostRequire = require;
 const host = hostRequire('obsidian');
@@ -150,6 +151,7 @@ try {
  }, 'Settings page');
  const text = () => settings.evaluate(`document.body.textContent`);
  await poll(async () => (await text()).includes('Connexion manuelle'), 'Initial settings');
+ assert.equal(await settings.evaluate(`document.querySelector('.vertical-tab-nav-item[data-setting-id="to-substack"] svg path')?.getAttribute('d')`), iconPath, 'Settings must display the bundled Substack logo');
  assert.ok((await text()).includes('Connectez-vous pour charger vos newsletters'));
  const secretControl = await settings.evaluate(`(() => {
   const row = [...document.querySelectorAll('.setting-item')].find(row => row.querySelector('.setting-item-name')?.textContent === 'Session Substack');
@@ -366,6 +368,7 @@ try {
   if (!item) return null;
   const box = item.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
  })()`), 'To Substack context menu item');
+ assert.equal(await main.evaluate(`[...document.querySelectorAll('.menu-item')].find(node => node.querySelector('.menu-item-title')?.textContent.trim() === 'To Substack')?.querySelector('svg path')?.getAttribute('d')`), iconPath, 'The file menu must display the bundled Substack logo');
  await main.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...postPoint, button: 'left', clickCount: 1 });
  await main.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...postPoint, button: 'left', clickCount: 1 });
  await poll(() => main.evaluate(`document.querySelector('.modal select')?.options.length === 2`), 'Newsletter chooser');

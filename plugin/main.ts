@@ -1,5 +1,6 @@
 import { setLocale, t } from './i18n';
-import { getLanguage, Notice, Plugin, TFile } from 'obsidian';
+import { addIcon, getLanguage, Notice, Plugin, TFile } from 'obsidian';
+import substackIcon from '../icon.svg';
 import { PostModal } from './post';
 import { SubstackLogin } from './auth';
 import { SubstackSettingTab } from './settings';
@@ -26,6 +27,7 @@ export default class ToSubstackPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		setLocale(getLanguage());
+		addIcon('to-substack', substackIcon);
 		const saved: unknown = await this.loadData();
 		if (saved && typeof saved === 'object' && 'sessionSecretId' in saved) {
 			const value: unknown = (saved as Record<string, unknown>).sessionSecretId;
@@ -36,7 +38,7 @@ export default class ToSubstackPlugin extends Plugin {
 		this.register(() => this.cancelConnection());
 		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
 			if (file instanceof TFile && file.extension === 'md') menu.addItem(item => item
-				.setTitle(t('pluginName')).setIcon('send').onClick(() => { new PostModal(this, file).open(); }));
+				.setTitle(t('pluginName')).setIcon('to-substack').onClick(() => { new PostModal(this, file).open(); }));
 		}));
 		if (this.settings.sessionSecretId && this.app.secretStorage.getSecret(this.settings.sessionSecretId)) {
 			void this.connect(false);

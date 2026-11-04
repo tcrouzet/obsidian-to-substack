@@ -1,1 +1,3 @@
-/* Keep this file non-empty: GitHub rejects empty release assets. */
+.vertical-tab-nav-item[data-setting-id="to-substack"] .vertical-tab-nav-item-icon {
+	display: flex;
+}

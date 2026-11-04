@@ -7,6 +7,7 @@ async function build() {
 	const context = await esbuild.context({
 		entryPoints: ['plugin/main.ts'],
 		bundle: true,
+		loader: { '.svg': 'text' },
 		external: [
 			'obsidian',
 			'electron',

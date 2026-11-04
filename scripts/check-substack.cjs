@@ -34,7 +34,7 @@ module.exports = (async () => {
 	const moduleForCheck = { exports: {} };
 	runInNewContext(buildSync({
 		stdin: { contents: "export { default } from './plugin/main'; export * from './plugin/substack'; export * from './plugin/i18n';", resolveDir: process.cwd(), loader: 'ts' },
-		bundle: true, write: false, format: 'cjs', external: ['obsidian']
+		bundle: true, write: false, format: 'cjs', external: ['obsidian'], loader: { '.svg': 'text' }
 	}).outputFiles[0].text, {
 		module: moduleForCheck,
 		exports: moduleForCheck.exports,
@@ -50,7 +50,7 @@ module.exports = (async () => {
 		},
 		require: name => {
 			assert.equal(name, 'obsidian');
-			return { Plugin, PluginSettingTab, Modal: class {}, Notice: class {}, getLanguage: () => language, Platform: { isDesktopApp: false }, requestUrl: async request => {
+			return { Plugin, PluginSettingTab, Modal: class {}, Notice: class {}, addIcon() {}, getLanguage: () => language, Platform: { isDesktopApp: false }, requestUrl: async request => {
 				requests.push(request);
 				return respond(request);
 			} };
@@ -169,7 +169,7 @@ module.exports = (async () => {
 
 	const plugin = new moduleForCheck.exports.default();
 	await plugin.onload();
-	assert.equal(plugin.tab.icon, 'send');
+	assert.equal(plugin.tab.icon, 'to-substack');
 	assert.equal(plugin.account, null);
 	await plugin.tab.setControlValue('sessionSecretId', 'session-importee');
 	secrets.set('session-importee', 'fixture-session');

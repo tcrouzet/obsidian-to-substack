@@ -45,7 +45,7 @@ class Plugin {}
 class PluginSettingTab {}
 const pluginModule = { exports: {} };
 runInNewContext(buildSync({
-	entryPoints: ['plugin/main.ts'], bundle: true, write: false, format: 'cjs', external: ['obsidian']
+	entryPoints: ['plugin/main.ts'], bundle: true, write: false, format: 'cjs', external: ['obsidian'], loader: { '.svg': 'text' }
 }).outputFiles[0].text, {
 	module: pluginModule,
 	exports: pluginModule.exports,
