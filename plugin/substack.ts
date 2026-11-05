@@ -126,23 +126,21 @@ function isReadyLanguage(edition: unknown, language: DraftLanguage): boolean {
 	} catch { return false; }
 }
 
-export async function activateDraftLanguages(session: string, newsletter: Newsletter, draftId: string, onProgress: (language: DraftLanguage) => void, selectedLanguages: readonly DraftLanguage[] = DRAFT_LANGUAGES): Promise<boolean> {
-	if (!selectedLanguages.length) return false;
+export async function activateDraftLanguages(session: string, newsletter: Newsletter, draftId: string, onProgress: (language: DraftLanguage) => void, selectedLanguages: readonly DraftLanguage[] = DRAFT_LANGUAGES, defaultLanguage?: DraftLanguage): Promise<boolean> {
+	const languages = DRAFT_LANGUAGES.filter(language => selectedLanguages.includes(language) && language !== defaultLanguage);
+	if (!languages.length) return false;
 	if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(newsletter.subdomain) || !/^[a-zA-Z0-9_-]+$/.test(draftId)) throw new SubstackError(t('invalidNewsletter'));
 	const baseUrl = `https://${newsletter.subdomain}.substack.com/api/v1`;
 	const settings = await request(session, { url: `${baseUrl}/publication_settings`, method: 'GET' });
 	if (!isRecord(settings)) throw new SubstackError(t('draftLanguagesFailed'));
 	if (settings.additional_post_languages_enabled !== true || settings.auto_translate_enabled === false) return false;
-	const publication = await request(session, { url: `${baseUrl}/publication`, method: 'GET' });
 	const url = `${baseUrl}/drafts/${draftId}`;
 	const draft = await request(session, { url, method: 'GET' });
-	if (!isRecord(publication) || typeof publication.language !== 'string' || !publication.language || !isRecord(draft) || String(draft.id) !== draftId || !Array.isArray(draft.post_translations)) throw new SubstackError(t('draftLanguagesFailed'));
+	if (!isRecord(draft) || String(draft.id) !== draftId || !Array.isArray(draft.post_translations)) throw new SubstackError(t('draftLanguagesFailed'));
 	const detected = draft.language ? draft : await request(session, { url: `${url}/detect-language`, method: 'GET' });
 	if (!isRecord(detected) || typeof detected.language !== 'string' || !/^[a-z]{2}(?:-[a-z]{2,4})?$/.test(detected.language)) throw new SubstackError(t('draftLanguagesFailed'));
 	const sourceLanguage = detected.language;
-	const publicationLanguage = publication.language.toLowerCase().split('-')[0];
-	const required = DRAFT_LANGUAGES.filter(language => selectedLanguages.includes(language) && language !== sourceLanguage
-		&& (language !== 'fr' || publicationLanguage !== 'fr'));
+	const required = languages.filter(language => language !== sourceLanguage);
 	for (const language of required) {
 		const existing: unknown = draft.post_translations.find(edition => isRecord(edition) && edition.language === language);
 		if (existing) {

@@ -4,12 +4,12 @@ import substackIcon from '../icon.svg';
 import { PostModal } from './post';
 import { SubstackLogin } from './auth';
 import { SubstackSettingTab } from './settings';
-import { DRAFT_LANGUAGES, getAccount, SubstackAccount, SubstackError } from './substack';
+import { DRAFT_LANGUAGES, DraftLanguage, getAccount, SubstackAccount, SubstackError } from './substack';
 
 const SESSION_SECRET = 'obsidian-to-substack-session';
 
 export default class ToSubstackPlugin extends Plugin {
-	settings = { sessionSecretId: '', translationLanguages: [...DRAFT_LANGUAGES] };
+	settings = { sessionSecretId: '', defaultLanguage: 'en' as DraftLanguage, translationLanguages: [...DRAFT_LANGUAGES] };
 	account: SubstackAccount | null = null;
 	activity = '';
 	error = '';
@@ -27,12 +27,16 @@ export default class ToSubstackPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		setLocale(getLanguage());
+		const appLanguage = getLanguage().toLowerCase().replace(/_/g, '-').split('-')[0];
+		this.settings.defaultLanguage = DRAFT_LANGUAGES.find(language => language === appLanguage) ?? 'en';
 		addIcon('to-substack', substackIcon);
 		const saved: unknown = await this.loadData();
 		if (saved && typeof saved === 'object') {
 			const data = saved as Record<string, unknown>;
 			const value = data.sessionSecretId;
 			if (typeof value === 'string' && /^[a-z0-9-]+$/.test(value)) this.settings.sessionSecretId = value;
+			const defaultLanguage = DRAFT_LANGUAGES.find(language => language === data.defaultLanguage);
+			if (defaultLanguage) this.settings.defaultLanguage = defaultLanguage;
 			const languages = data.translationLanguages;
 			if (Array.isArray(languages)) this.settings.translationLanguages = DRAFT_LANGUAGES.filter(language => languages.includes(language));
 		}

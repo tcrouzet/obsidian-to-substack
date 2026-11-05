@@ -273,7 +273,7 @@ try {
  })()`);
  if (!saved.stored) console.error('STORED COOKIE NAMES', JSON.stringify(saved.cookieNames));
  delete saved.cookieNames;
- assert.deepEqual(saved, { keys: ['sessionSecretId', 'translationLanguages'], reference: 'obsidian-to-substack-session', stored: true });
+ assert.deepEqual(saved, { keys: ['sessionSecretId', 'defaultLanguage', 'translationLanguages'], reference: 'obsidian-to-substack-session', stored: true });
 
  await main.evaluate(`globalThis.toSubstackTestDenied = true`);
  await clickButton('Actualiser');

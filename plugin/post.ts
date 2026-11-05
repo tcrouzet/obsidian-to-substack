@@ -154,7 +154,7 @@ export class PostModal extends Modal {
 				try {
 					const activated = await activateDraftLanguages(session, newsletter, url.slice(url.lastIndexOf('/') + 1), language => {
 						languageStatus.setText(t('activatingDraftLanguage', { language: draftLanguageName(language) }));
-					}, this.plugin.settings.translationLanguages);
+					}, this.plugin.settings.translationLanguages, this.plugin.settings.defaultLanguage);
 					if (activated) languageStatus.setText(t('draftLanguagesReady'));
 					else languageStatus.remove();
 				} catch {

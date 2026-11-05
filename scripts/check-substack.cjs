@@ -173,13 +173,11 @@ module.exports = (async () => {
 	assert.equal(await activateDraftLanguages('token', newsletter, '123', language => progress.push(language)), false);
 	assert.deepEqual(requests.slice(beforeDisabled).map(request => request.method), ['GET']);
 	let editions = [{ language: 'en', draft_body: JSON.stringify(post.body) }];
-	let publicationLanguage = 'fr';
 	let sourceLanguage = 'fr';
 	let persistEdition = true;
 	let translationStatus = 200;
 	const translated = request => {
 		if (request.url.endsWith('/publication_settings')) return { status: 200, json: { additional_post_languages_enabled: true, auto_translate_enabled: true } };
-		if (request.url.endsWith('/publication')) return { status: 200, json: { language: publicationLanguage } };
 		if (request.url.endsWith('/detect-language')) return { status: 200, json: { language: sourceLanguage } };
 		if (request.method === 'GET' && request.url.endsWith('/drafts/123')) return { status: 200, json: { id: 123, language: null, post_translations: editions.slice() } };
 		assert.equal(request.method, 'POST');
@@ -197,7 +195,7 @@ module.exports = (async () => {
 	assert.equal(requests.at(-1).method, 'GET', 'Language editions must be read back before reporting success');
 	assert.equal(requests.at(-1).url, 'https://choisie.substack.com/api/v1/drafts/123');
 	editions = [];
-	publicationLanguage = sourceLanguage = 'en';
+	sourceLanguage = 'en';
 	progress.length = 0;
 	await activateDraftLanguages('token', newsletter, '123', language => progress.push(language));
 	assert.deepEqual(progress, ['es', 'de', 'it', 'pt', 'fr']);
@@ -205,8 +203,15 @@ module.exports = (async () => {
 	progress.length = 0;
 	await activateDraftLanguages('token', newsletter, '123', language => progress.push(language), ['en', 'de', 'it']);
 	assert.deepEqual(progress, ['de', 'it'], 'Only selected languages other than the original must be added');
+	for (const defaultLanguage of ['en', 'es', 'de', 'it', 'pt', 'fr']) {
+		editions = [];
+		progress.length = 0;
+		await activateDraftLanguages('token', newsletter, '123', language => progress.push(language), ['en', 'es', 'de', 'it', 'pt', 'fr'], defaultLanguage);
+		assert.deepEqual(progress, ['es', 'de', 'it', 'pt', 'fr'].filter(language => language !== defaultLanguage), 'Every default language must be excluded from additional editions');
+	}
 	const beforeUnchecked = requests.length;
 	assert.equal(await activateDraftLanguages('token', newsletter, '123', () => assert.fail('No language selected'), []), false);
+	assert.equal(await activateDraftLanguages('token', newsletter, '123', () => assert.fail('Only the default language remains selected'), ['de'], 'de'), false);
 	assert.equal(requests.length, beforeUnchecked, 'Unchecking every language must disable all translation requests');
 	editions = [];
 	persistEdition = false;
@@ -234,23 +239,33 @@ module.exports = (async () => {
 	const beforeInvalidDraft = requests.length;
 	await assert.rejects(activateDraftLanguages('token', newsletter, '../123', () => {}), /invalide/);
 	assert.equal(requests.length, beforeInvalidDraft);
-	console.log('Draft languages: disabled setting, existing editions, French fallback, read-back confirmation, failures and deadlines pass.');
+	console.log('Draft languages: selected editions, default-language exclusion, read-back confirmation, failures and deadlines pass.');
 
 	const plugin = new moduleForCheck.exports.default();
 	await plugin.onload();
 	assert.equal(plugin.tab.icon, 'to-substack');
 	assert.equal(plugin.account, null);
 	assert.equal(plugin.settings.translationLanguages.join(','), 'en,es,de,it,pt,fr');
-	assert.equal(plugin.tab.getSettingDefinitions()[2].items.map(item => item.name).join(','), 'Anglais,Espagnol,Allemand,Italien,Portugais,Français');
+	assert.equal(plugin.settings.defaultLanguage, 'fr');
+	const languageSettings = plugin.tab.getSettingDefinitions()[2].items;
+	assert.equal(languageSettings[0].control.type, 'dropdown');
+	assert.equal(languageSettings[0].control.key, 'defaultLanguage');
+	assert.equal(Object.keys(languageSettings[0].control.options).join(','), 'en,es,de,it,pt,fr');
+	assert.equal(languageSettings.slice(1).map(item => item.name).join(','), 'Anglais,Espagnol,Allemand,Italien,Portugais');
 	await plugin.tab.setControlValue('sessionSecretId', 'session-importee');
 	secrets.set('session-importee', 'fixture-session');
 	respond = () => ({ status: 200, json: profile });
 	await plugin.connect(false);
 	assert.equal(plugin.account.newsletters.length, 2);
 	assert.equal(plugin.tab.getSettingDefinitions()[1].items.length, 2);
-	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId,translationLanguages');
+	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId,defaultLanguage,translationLanguages');
 	assert.equal(JSON.stringify(plugin.saved).includes('fixture-session'), false);
 	const connectedAccount = plugin.account;
+	await plugin.tab.setControlValue('defaultLanguage', 'de');
+	assert.equal(plugin.saved.defaultLanguage, 'de');
+	assert.equal(plugin.account, connectedAccount, 'Choosing the default language must keep the account connected');
+	assert.equal(plugin.tab.getSettingDefinitions()[2].items.slice(1).map(item => item.name).join(','), 'Anglais,Espagnol,Italien,Portugais,Français');
+	assert.equal(plugin.saved.translationLanguages.join(','), 'en,es,de,it,pt,fr', 'Changing the default must preserve existing language choices');
 	await plugin.tab.setControlValue('translationLanguages', ['de', 'it']);
 	assert.equal(plugin.account, connectedAccount, 'Choosing languages must keep the account connected');
 	assert.equal(plugin.saved.translationLanguages.join(','), 'de,it');
@@ -260,17 +275,19 @@ module.exports = (async () => {
 	assert.equal(plugin.settings.sessionSecretId, '');
 	assert.equal(plugin.saved.sessionSecretId, '');
 	assert.equal(plugin.saved.translationLanguages.join(','), 'de,it', 'Disconnecting must preserve language preferences');
+	assert.equal(plugin.saved.defaultLanguage, 'de');
 	assert.equal(secrets.get('session-importee'), 'fixture-session', 'Imported shared secrets belong to the user');
-	for (const [savedPreferences, expected] of [
-		[{ sessionSecretId: '' }, 'en,es,de,it,pt,fr'],
-		[{ translationLanguages: ['it', 'de', 'it', 'unknown', null] }, 'de,it'],
-		[{ translationLanguages: [] }, ''],
-		[{ translationLanguages: 'de' }, 'en,es,de,it,pt,fr']
+	for (const [savedPreferences, expected, expectedDefault] of [
+		[{ sessionSecretId: '' }, 'en,es,de,it,pt,fr', 'fr'],
+		[{ defaultLanguage: 'it', translationLanguages: ['it', 'de', 'it', 'unknown', null] }, 'de,it', 'it'],
+		[{ defaultLanguage: 'invalid', translationLanguages: [] }, '', 'fr'],
+		[{ defaultLanguage: null, translationLanguages: 'de' }, 'en,es,de,it,pt,fr', 'fr']
 	]) {
 		const reloaded = new moduleForCheck.exports.default();
 		reloaded.saved = savedPreferences;
 		await reloaded.onload();
 		assert.equal(reloaded.settings.translationLanguages.join(','), expected);
+		assert.equal(reloaded.settings.defaultLanguage, expectedDefault);
 	}
 
 	await plugin.tab.setControlValue('sessionSecretId', 'session-importee');
@@ -297,6 +314,7 @@ module.exports = (async () => {
 		const localizedPlugin = new moduleForCheck.exports.default();
 		await localizedPlugin.onload();
 		assert.equal(localizedPlugin.tab.getSettingDefinitions()[0].heading, heading);
+		assert.equal(localizedPlugin.settings.defaultLanguage, selectedLanguage === 'fr-CA' ? 'fr' : selectedLanguage);
 		await localizedPlugin.tab.setControlValue('sessionSecretId', 'session-importee');
 		await localizedPlugin.connect(false);
 		assert.match(localizedPlugin.error, selectedLanguage === 'fr-CA' ? /refusée ou expirée/ : /Session rejected or expired/);

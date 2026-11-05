@@ -1,5 +1,5 @@
 import { draftLanguageName, t } from './i18n';
-import { App, Platform, PluginSettingTab, SettingDefinitionItem } from 'obsidian';
+import { App, Platform, PluginSettingTab, SettingDefinition, SettingDefinitionItem } from 'obsidian';
 import type ToSubstackPlugin from './main';
 import { DRAFT_LANGUAGES } from './substack';
 
@@ -20,6 +20,11 @@ export class SubstackSettingTab extends PluginSettingTab {
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		const plugin = this.plugin;
+		const languageNames: Record<string, string> = {};
+		for (const language of DRAFT_LANGUAGES) {
+			const name = draftLanguageName(language);
+			languageNames[language] = name.charAt(0).toUpperCase() + name.slice(1);
+		}
 		return [
 			{
 				type: 'group',
@@ -60,11 +65,16 @@ export class SubstackSettingTab extends PluginSettingTab {
 			{
 				type: 'group',
 				heading: t('languageEditions'),
-				items: DRAFT_LANGUAGES.map(language => {
-					const name = draftLanguageName(language);
+				items: [{
+					name: t('defaultLanguage'),
+					desc: t('defaultLanguageHelp'),
+					control: {
+						type: 'dropdown', key: 'defaultLanguage', disabled: () => plugin.busy,
+						options: languageNames
+					}
+				}, ...DRAFT_LANGUAGES.filter(language => language !== plugin.settings.defaultLanguage).map<SettingDefinition>(language => {
 					return {
-						name: name.charAt(0).toUpperCase() + name.slice(1),
-						desc: language === 'fr' ? t('frenchEditionHelp') : '',
+						name: languageNames[language],
 						render: setting => { setting.addToggle(toggle => toggle
 							.setValue(plugin.settings.translationLanguages.includes(language))
 							.setDisabled(plugin.busy)
@@ -73,7 +83,7 @@ export class SubstackSettingTab extends PluginSettingTab {
 								await this.setControlValue('translationLanguages', selected);
 							})); }
 					};
-				})
+				})]
 			},
 			{
 				type: 'group',
