@@ -30,6 +30,7 @@ globalThis.toSubstackPendingResponses = [];
 globalThis.toSubstackDrafts = [];
 globalThis.toSubstackImageUploads = [];
 const fixtureApi = { ...host, requestUrl: async options => {
+ if (options.method === 'GET' && ['https://premiere-fixture.substack.com/api/v1/publication_settings', 'https://deuxieme-fixture.substack.com/api/v1/publication_settings'].includes(options.url)) return { status: 200, json: { additional_post_languages_enabled: false } };
  if (options.method === 'POST' && ['https://premiere-fixture.substack.com/api/v1/image', 'https://deuxieme-fixture.substack.com/api/v1/image'].includes(options.url)) {
   globalThis.toSubstackImageUploads.push({ url: options.url, contentType: options.headers['Content-Type'], image: new URLSearchParams(options.body).get('image') });
   if (globalThis.toSubstackImageFailure) return { status: 500 };
@@ -272,7 +273,7 @@ try {
  })()`);
  if (!saved.stored) console.error('STORED COOKIE NAMES', JSON.stringify(saved.cookieNames));
  delete saved.cookieNames;
- assert.deepEqual(saved, { keys: ['sessionSecretId'], reference: 'obsidian-to-substack-session', stored: true });
+ assert.deepEqual(saved, { keys: ['sessionSecretId', 'translationLanguages'], reference: 'obsidian-to-substack-session', stored: true });
 
  await main.evaluate(`globalThis.toSubstackTestDenied = true`);
  await clickButton('Actualiser');
@@ -482,7 +483,7 @@ try {
   new ui.PostModal(plugin, app.vault.getFileByPath('Test.md')).open();
   return { headings: definitions.map(group => group.heading), status: definitions[0].items[0].name };
  })()`);
- assert.deepEqual(englishSettings.headings, ['Substack account', 'Newsletters', 'Manual connection']);
+ assert.deepEqual(englishSettings.headings, ['Substack account', 'Newsletters', 'Language editions', 'Manual connection']);
  assert.equal(englishSettings.status, 'Connected to Compte de test');
  const englishCreate = await poll(() => main.evaluate(`(() => {
   const button = [...document.querySelectorAll('.modal button')].find(node => node.textContent === 'Create draft');

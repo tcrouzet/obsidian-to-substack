@@ -64,5 +64,17 @@
   "invalidEncodedImage": "Une image encodée est invalide.",
   "imageUploadFailed": "L’envoi d’une image à Substack a échoué. Le brouillon n’a pas été créé.",
   "createdDraftUnconfirmed": "Substack ne confirme pas le brouillon créé. Vérifiez vos brouillons avant de recommencer.",
-  "translationParameterMissing": "Paramètre de traduction manquant : {name}"
+  "translationParameterMissing": "Paramètre de traduction manquant : {name}",
+  "languageEditions": "Éditions linguistiques",
+  "frenchEditionHelp": "Ajouté uniquement si la langue de la newsletter n’est pas le français.",
+  "checkingDraftLanguages": "Vérification des éditions linguistiques…",
+  "activatingDraftLanguage": "Préparation de l’édition en {language}…",
+  "draftLanguagesReady": "Les éditions linguistiques sont prêtes.",
+  "draftLanguagesFailed": "Le brouillon est créé, mais toutes ses éditions linguistiques n’ont pas pu être confirmées. Vérifiez-les dans Substack avec le lien ci-dessus.",
+  "languageEnglish": "anglais",
+  "languageSpanish": "espagnol",
+  "languageGerman": "allemand",
+  "languageItalian": "italien",
+  "languagePortuguese": "portugais",
+  "languageFrench": "français"
 }

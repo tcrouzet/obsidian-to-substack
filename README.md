@@ -35,6 +35,12 @@ Use **Refresh** to reload your newsletters, **Switch account** to connect anothe
 
 Each export creates a new draft. You control publication and email delivery in Substack.
 
+Choose the languages to prepare under **Settings → To Substack → Language editions**. English, Spanish, German, Italian, European Portuguese, and French are selected by default. Uncheck every language to disable automatic editions. Your choices apply to future drafts.
+
+If **Additional post languages** and **Allow automatic translation** are enabled in your Substack publication settings, To Substack prepares the selected editions. It adds French only when the newsletter's language is not French and skips the post's original language. Existing editions are preserved.
+
+The plugin waits for Substack to generate the editions, then checks that they were saved before reporting them as ready. If a language cannot be confirmed, the draft link remains available so you can review the editions in Substack.
+
 | In your note | In the Substack draft |
 | --- | --- |
 | The first level-one heading, `# Title` | Post title |

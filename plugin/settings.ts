@@ -1,6 +1,7 @@
-import { t } from './i18n';
+import { draftLanguageName, t } from './i18n';
 import { App, Platform, PluginSettingTab, SettingDefinitionItem } from 'obsidian';
 import type ToSubstackPlugin from './main';
+import { DRAFT_LANGUAGES } from './substack';
 
 export class SubstackSettingTab extends PluginSettingTab {
 	override icon = 'to-substack';
@@ -12,7 +13,7 @@ export class SubstackSettingTab extends PluginSettingTab {
 	}
 
 	override async setControlValue(key: string, value: unknown): Promise<void> {
-		this.plugin.cancelConnection();
+		if (key === 'sessionSecretId') this.plugin.cancelConnection();
 		await super.setControlValue(key, value);
 		this.update();
 	}
@@ -55,6 +56,24 @@ export class SubstackSettingTab extends PluginSettingTab {
 					name: plugin.account ? t('noNewsletters') : t('connectToLoadNewsletters'),
 					desc: plugin.account ? t('checkAccountAccess') : ''
 				}]
+			},
+			{
+				type: 'group',
+				heading: t('languageEditions'),
+				items: DRAFT_LANGUAGES.map(language => {
+					const name = draftLanguageName(language);
+					return {
+						name: name.charAt(0).toUpperCase() + name.slice(1),
+						desc: language === 'fr' ? t('frenchEditionHelp') : '',
+						render: setting => { setting.addToggle(toggle => toggle
+							.setValue(plugin.settings.translationLanguages.includes(language))
+							.setDisabled(plugin.busy)
+							.onChange(async enabled => {
+								const selected = DRAFT_LANGUAGES.filter(candidate => candidate === language ? enabled : plugin.settings.translationLanguages.includes(candidate));
+								await this.setControlValue('translationLanguages', selected);
+							})); }
+					};
+				})
 			},
 			{
 				type: 'group',

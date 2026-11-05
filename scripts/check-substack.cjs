@@ -41,7 +41,7 @@ module.exports = (async () => {
 		URL,
 		window: {
 			setTimeout: (callback, delay) => {
-				assert.equal(delay, 15000);
+				assert.equal(delay, requests.at(-1)?.url.includes('/translations/') ? 120000 : 15000);
 				const id = ++timerId;
 				timers.set(id, callback);
 				return id;
@@ -56,7 +56,7 @@ module.exports = (async () => {
 			} };
 		}
 	});
-	const { normalizeSession, parseAccount, getAccount, createDraft, setLocale } = moduleForCheck.exports;
+	const { normalizeSession, parseAccount, getAccount, createDraft, activateDraftLanguages, setLocale } = moduleForCheck.exports;
 	setLocale('fr');
 	const profile = { name: 'Compte de test', publicationUsers: [
 		{ publication: { name: 'Première newsletter', subdomain: 'premiere' } },
@@ -167,23 +167,111 @@ module.exports = (async () => {
 		assert.equal(requests.length, beforeFailedImage + 1, 'A failed image upload must not create a partial draft or retry automatically');
 	}
 
+	const progress = [];
+	respond = () => ({ status: 200, json: { additional_post_languages_enabled: false } });
+	const beforeDisabled = requests.length;
+	assert.equal(await activateDraftLanguages('token', newsletter, '123', language => progress.push(language)), false);
+	assert.deepEqual(requests.slice(beforeDisabled).map(request => request.method), ['GET']);
+	let editions = [{ language: 'en', draft_body: JSON.stringify(post.body) }];
+	let publicationLanguage = 'fr';
+	let sourceLanguage = 'fr';
+	let persistEdition = true;
+	let translationStatus = 200;
+	const translated = request => {
+		if (request.url.endsWith('/publication_settings')) return { status: 200, json: { additional_post_languages_enabled: true, auto_translate_enabled: true } };
+		if (request.url.endsWith('/publication')) return { status: 200, json: { language: publicationLanguage } };
+		if (request.url.endsWith('/detect-language')) return { status: 200, json: { language: sourceLanguage } };
+		if (request.method === 'GET' && request.url.endsWith('/drafts/123')) return { status: 200, json: { id: 123, language: null, post_translations: editions.slice() } };
+		assert.equal(request.method, 'POST');
+		assert.match(request.url, /\/drafts\/123\/translations\/(en|es|de|it|pt|fr)$/);
+		assert.deepEqual(JSON.parse(request.body), { sourceLanguage });
+		const edition = { language: request.url.split('/').at(-1), draft_body: JSON.stringify(post.body) };
+		if (persistEdition && translationStatus === 200) editions.push(edition);
+		return { status: translationStatus, json: edition };
+	};
+	respond = translated;
+	const beforeLanguages = requests.length;
+	assert.equal(await activateDraftLanguages('token', newsletter, '123', language => progress.push(language)), true);
+	assert.deepEqual(progress, ['es', 'de', 'it', 'pt']);
+	assert.deepEqual(requests.slice(beforeLanguages).filter(request => request.method === 'POST').map(request => request.url.split('/').at(-1)), progress);
+	assert.equal(requests.at(-1).method, 'GET', 'Language editions must be read back before reporting success');
+	assert.equal(requests.at(-1).url, 'https://choisie.substack.com/api/v1/drafts/123');
+	editions = [];
+	publicationLanguage = sourceLanguage = 'en';
+	progress.length = 0;
+	await activateDraftLanguages('token', newsletter, '123', language => progress.push(language));
+	assert.deepEqual(progress, ['es', 'de', 'it', 'pt', 'fr']);
+	editions = [];
+	progress.length = 0;
+	await activateDraftLanguages('token', newsletter, '123', language => progress.push(language), ['en', 'de', 'it']);
+	assert.deepEqual(progress, ['de', 'it'], 'Only selected languages other than the original must be added');
+	const beforeUnchecked = requests.length;
+	assert.equal(await activateDraftLanguages('token', newsletter, '123', () => assert.fail('No language selected'), []), false);
+	assert.equal(requests.length, beforeUnchecked, 'Unchecking every language must disable all translation requests');
+	editions = [];
+	persistEdition = false;
+	await assert.rejects(activateDraftLanguages('token', newsletter, '123', () => {}), /brouillon est créé/);
+	persistEdition = true;
+	translationStatus = 500;
+	const beforeTranslationFailure = requests.length;
+	await assert.rejects(activateDraftLanguages('token', newsletter, '123', () => {}), /Substack/);
+	assert.equal(requests.slice(beforeTranslationFailure).filter(request => request.method === 'POST').length, 1, 'Failed language requests must not be retried or create another draft');
+	translationStatus = 200;
+	editions = [{ language: 'es', draft_body: null }];
+	const beforeIncomplete = requests.length;
+	await assert.rejects(activateDraftLanguages('token', newsletter, '123', () => {}), /brouillon est créé/);
+	assert.equal(requests.slice(beforeIncomplete).some(request => request.method === 'POST'), false, 'Existing incomplete editions must not be overwritten');
+	editions = [];
+	let notifyTranslation;
+	const translationStarted = new Promise(resolve => { notifyTranslation = resolve; });
+	respond = request => request.method === 'POST' ? (notifyTranslation(), new Promise(() => {})) : translated(request);
+	const translationTimeout = activateDraftLanguages('token', newsletter, '123', () => {});
+	await translationStarted;
+	assert.equal(timers.size, 1);
+	[...timers.values()][0]();
+	await assert.rejects(translationTimeout, /Vérifiez les brouillons/);
+	assert.equal(timers.size, 0);
+	const beforeInvalidDraft = requests.length;
+	await assert.rejects(activateDraftLanguages('token', newsletter, '../123', () => {}), /invalide/);
+	assert.equal(requests.length, beforeInvalidDraft);
+	console.log('Draft languages: disabled setting, existing editions, French fallback, read-back confirmation, failures and deadlines pass.');
+
 	const plugin = new moduleForCheck.exports.default();
 	await plugin.onload();
 	assert.equal(plugin.tab.icon, 'to-substack');
 	assert.equal(plugin.account, null);
+	assert.equal(plugin.settings.translationLanguages.join(','), 'en,es,de,it,pt,fr');
+	assert.equal(plugin.tab.getSettingDefinitions()[2].items.map(item => item.name).join(','), 'Anglais,Espagnol,Allemand,Italien,Portugais,Français');
 	await plugin.tab.setControlValue('sessionSecretId', 'session-importee');
 	secrets.set('session-importee', 'fixture-session');
 	respond = () => ({ status: 200, json: profile });
 	await plugin.connect(false);
 	assert.equal(plugin.account.newsletters.length, 2);
 	assert.equal(plugin.tab.getSettingDefinitions()[1].items.length, 2);
-	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId');
+	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId,translationLanguages');
 	assert.equal(JSON.stringify(plugin.saved).includes('fixture-session'), false);
+	const connectedAccount = plugin.account;
+	await plugin.tab.setControlValue('translationLanguages', ['de', 'it']);
+	assert.equal(plugin.account, connectedAccount, 'Choosing languages must keep the account connected');
+	assert.equal(plugin.saved.translationLanguages.join(','), 'de,it');
+	assert.equal(plugin.saved.sessionSecretId, 'session-importee');
 	await plugin.disconnect();
 	assert.equal(plugin.account, null);
 	assert.equal(plugin.settings.sessionSecretId, '');
 	assert.equal(plugin.saved.sessionSecretId, '');
+	assert.equal(plugin.saved.translationLanguages.join(','), 'de,it', 'Disconnecting must preserve language preferences');
 	assert.equal(secrets.get('session-importee'), 'fixture-session', 'Imported shared secrets belong to the user');
+	for (const [savedPreferences, expected] of [
+		[{ sessionSecretId: '' }, 'en,es,de,it,pt,fr'],
+		[{ translationLanguages: ['it', 'de', 'it', 'unknown', null] }, 'de,it'],
+		[{ translationLanguages: [] }, ''],
+		[{ translationLanguages: 'de' }, 'en,es,de,it,pt,fr']
+	]) {
+		const reloaded = new moduleForCheck.exports.default();
+		reloaded.saved = savedPreferences;
+		await reloaded.onload();
+		assert.equal(reloaded.settings.translationLanguages.join(','), expected);
+	}
 
 	await plugin.tab.setControlValue('sessionSecretId', 'session-importee');
 	let finish;

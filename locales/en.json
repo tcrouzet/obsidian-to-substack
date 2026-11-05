@@ -64,5 +64,17 @@
   "invalidEncodedImage": "An encoded image is invalid.",
   "imageUploadFailed": "Could not upload an image to Substack. The draft was not created.",
   "createdDraftUnconfirmed": "Substack did not confirm the created draft. Check your drafts before trying again.",
-  "translationParameterMissing": "Missing translation parameter: {name}"
+  "translationParameterMissing": "Missing translation parameter: {name}",
+  "languageEditions": "Language editions",
+  "frenchEditionHelp": "Added only when the newsletter's language is not French.",
+  "checkingDraftLanguages": "Checking language editions…",
+  "activatingDraftLanguage": "Preparing the {language} edition…",
+  "draftLanguagesReady": "Language editions are ready.",
+  "draftLanguagesFailed": "The draft was created, but its language editions could not all be confirmed. Check them in Substack using the link above.",
+  "languageEnglish": "English",
+  "languageSpanish": "Spanish",
+  "languageGerman": "German",
+  "languageItalian": "Italian",
+  "languagePortuguese": "Portuguese",
+  "languageFrench": "French"
 }

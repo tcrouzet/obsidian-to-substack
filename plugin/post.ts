@@ -1,7 +1,7 @@
-import { t } from './i18n';
+import { draftLanguageName, t } from './i18n';
 import { App, arrayBufferToBase64, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, Setting, TFile } from 'obsidian';
 import type ToSubstackPlugin from './main';
-import { createDraft, PostContent, PostNode, SubstackError } from './substack';
+import { activateDraftLanguages, createDraft, PostContent, PostNode, SubstackError } from './substack';
 
 async function encodeImages(app: App, file: TFile, container: HTMLElement): Promise<void> {
 	const encoded = new Map<string, string>();
@@ -150,6 +150,17 @@ export class PostModal extends Modal {
 				this.contentEl.empty();
 				this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) });
 				this.contentEl.createEl('a', { text: t('openDraft'), href: url, attr: { target: '_blank', rel: 'noopener' } });
+				const languageStatus = this.contentEl.createEl('p', { text: t('checkingDraftLanguages'), attr: { role: 'status', 'aria-live': 'polite' } });
+				try {
+					const activated = await activateDraftLanguages(session, newsletter, url.slice(url.lastIndexOf('/') + 1), language => {
+						languageStatus.setText(t('activatingDraftLanguage', { language: draftLanguageName(language) }));
+					}, this.plugin.settings.translationLanguages);
+					if (activated) languageStatus.setText(t('draftLanguagesReady'));
+					else languageStatus.remove();
+				} catch {
+					languageStatus.setAttribute('role', 'alert');
+					languageStatus.setText(t('draftLanguagesFailed'));
+				}
 			} catch (error) {
 				status.setAttribute('role', 'alert');
 				status.setText(error instanceof SubstackError ? error.message : t('draftFailed'));

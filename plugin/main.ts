@@ -4,12 +4,12 @@ import substackIcon from '../icon.svg';
 import { PostModal } from './post';
 import { SubstackLogin } from './auth';
 import { SubstackSettingTab } from './settings';
-import { getAccount, SubstackAccount, SubstackError } from './substack';
+import { DRAFT_LANGUAGES, getAccount, SubstackAccount, SubstackError } from './substack';
 
 const SESSION_SECRET = 'obsidian-to-substack-session';
 
 export default class ToSubstackPlugin extends Plugin {
-	settings = { sessionSecretId: '' };
+	settings = { sessionSecretId: '', translationLanguages: [...DRAFT_LANGUAGES] };
 	account: SubstackAccount | null = null;
 	activity = '';
 	error = '';
@@ -29,9 +29,12 @@ export default class ToSubstackPlugin extends Plugin {
 		setLocale(getLanguage());
 		addIcon('to-substack', substackIcon);
 		const saved: unknown = await this.loadData();
-		if (saved && typeof saved === 'object' && 'sessionSecretId' in saved) {
-			const value: unknown = (saved as Record<string, unknown>).sessionSecretId;
+		if (saved && typeof saved === 'object') {
+			const data = saved as Record<string, unknown>;
+			const value = data.sessionSecretId;
 			if (typeof value === 'string' && /^[a-z0-9-]+$/.test(value)) this.settings.sessionSecretId = value;
+			const languages = data.translationLanguages;
+			if (Array.isArray(languages)) this.settings.translationLanguages = DRAFT_LANGUAGES.filter(language => languages.includes(language));
 		}
 		this.settingsTab = new SubstackSettingTab(this.app, this);
 		this.addSettingTab(this.settingsTab);
@@ -87,7 +90,7 @@ export default class ToSubstackPlugin extends Plugin {
 				const previousId = this.settings.sessionSecretId;
 				try {
 					this.app.secretStorage.setSecret(SESSION_SECRET, session);
-					await this.saveData({ sessionSecretId: SESSION_SECRET });
+					await this.saveData({ ...this.settings, sessionSecretId: SESSION_SECRET });
 					this.settings.sessionSecretId = SESSION_SECRET;
 				} catch {
 					this.app.secretStorage.setSecret(SESSION_SECRET, previousSecret ?? '');
@@ -117,7 +120,7 @@ export default class ToSubstackPlugin extends Plugin {
 		this.activity = t('disconnecting');
 		this.settingsTab.update();
 		try {
-			await this.saveData({ sessionSecretId: '' });
+			await this.saveData({ ...this.settings, sessionSecretId: '' });
 			if (this.settings.sessionSecretId === SESSION_SECRET) this.app.secretStorage.setSecret(SESSION_SECRET, '');
 			this.settings.sessionSecretId = '';
 			this.cancelConnection();
