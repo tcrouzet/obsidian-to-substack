@@ -1,8 +1,8 @@
 # To Substack
 
-**From an Obsidian note to a Substack draft.**
+**From an Obsidian note to a Substack draft or Note.**
 
-Write in Obsidian, choose your newsletter, and create a Substack draft with your title, subtitle, formatted text, and images. Open the draft in Substack to review it and publish when you are ready. Your original note and attachments stay unchanged.
+Write in Obsidian, choose your newsletter, and create a Substack draft with your title, subtitle, formatted text, and images. Or choose **Note** to publish directly to your Substack Notes feed. Your original note and attachments stay unchanged.
 
 [Install To Substack from Obsidian](https://community.obsidian.md/plugins/to-substack) · [Report an issue](https://github.com/tcrouzet/obsidian-to-substack/issues)
 
@@ -12,7 +12,7 @@ Write in Obsidian, choose your newsletter, and create a Substack draft with your
 2. Search for **To Substack**, then select **Install** and **Enable**.
 3. Open **Settings → To Substack** to connect your account.
 
-Requires **Obsidian 1.14 or later** and a Substack account with access to a newsletter.
+Requires **Obsidian 1.14 or later** and a Substack account. Newsletter drafts require access to a newsletter; publishing Notes does not.
 
 The interface follows the language selected in Obsidian: English or French, with English used for other languages.
 
@@ -73,9 +73,20 @@ Local images are uploaded to the selected newsletter before the draft is created
 
 If an image cannot be found or uploaded, the plugin stops before creating the draft and shows an error. If a connection error leaves the result of draft creation uncertain, check your Substack drafts before trying again.
 
+## Publish a Substack Note
+
+1. Right-click a Markdown note and choose **To Substack**.
+2. In **Destination**, select **Note** alongside your available newsletters.
+3. Click **Publish note**. This publishes immediately to the connected account's Notes feed.
+4. Follow **Open note in Substack** to view it.
+
+The title and opening italic paragraph remain in the Note's text. Headings become bold paragraphs; lists, quotes, links, and code retain their formatting. Images appear as gallery attachments, with a maximum of 20 unique images. Notes use Substack's own layout rather than inline image positions. Language edition settings apply to newsletter drafts.
+
+If Substack does not confirm publication, check your Notes before trying again. The plugin never retries publication automatically.
+
 ## Account and privacy
 
-Creating a draft sends the selected note's title, subtitle, body, and local images to Substack. Your session is kept in **Obsidian's secret storage**; the plugin settings contain only a reference to that secret.
+Creating a draft or publishing a Note sends the selected content and images to Substack. Your session is kept in **Obsidian's secret storage**; the plugin settings contain only a reference to that secret.
 
 Disconnecting removes the connection and clears the session secret created by To Substack. Secrets you imported from elsewhere remain available in Obsidian's secret storage.
 
@@ -89,7 +100,7 @@ A session cookie grants access to your account. Keep it private.
 
 - The automatic sign-in window is available on desktop. Mobile requires manual session setup; the mobile workflow has not yet been validated on iOS or Android.
 - Tables and embedded files other than images, including PDFs, audio, video, and embedded notes, are not supported.
-- To Substack uses Substack's undocumented API. Changes to Substack may affect the connection or draft creation.
+- To Substack uses Substack's undocumented API. Changes to Substack may affect the connection, draft creation, or Note publication.
 
 ## Install from the terminal
 

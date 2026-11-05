@@ -1,7 +1,9 @@
 import { draftLanguageName, t } from './i18n';
-import { App, arrayBufferToBase64, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, Setting, TFile } from 'obsidian';
+import { App, arrayBufferToBase64, ButtonComponent, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, Setting, TFile } from 'obsidian';
 import type ToSubstackPlugin from './main';
-import { activateDraftLanguages, createDraft, PostContent, PostNode, SubstackError } from './substack';
+import { activateDraftLanguages, createDraft, publishNote, PostContent, PostNode, SubstackError } from './substack';
+
+const NOTE_DESTINATION = ':note';
 
 async function encodeImages(app: App, file: TFile, container: HTMLElement): Promise<void> {
 	const encoded = new Map<string, string>();
@@ -96,7 +98,7 @@ function blocks(parent: Element): PostNode[] {
 	return result;
 }
 
-export async function preparePost(app: App, file: TFile): Promise<PostContent> {
+export async function preparePost(app: App, file: TFile, forNote = false): Promise<PostContent> {
 	const markdown = await app.vault.read(file);
 	const container = createDiv();
 	const component = new Component();
@@ -105,13 +107,13 @@ export async function preparePost(app: App, file: TFile): Promise<PostContent> {
 		await MarkdownRenderer.render(app, markdown.slice(getFrontMatterInfo(markdown).contentStart), container, file.path, component);
 		await encodeImages(app, file, container);
 		container.querySelectorAll('button, .collapse-indicator, .heading-collapse-indicator, .list-collapse-indicator').forEach(node => node.remove());
-		const heading = container.querySelector('h1');
+		const heading = forNote ? null : container.querySelector('h1');
 		const title = heading?.textContent?.trim() || file.basename;
 		heading?.remove();
 		const body = blocks(container);
 		const first = body[0];
 		let subtitle = '';
-		if (first?.type === 'paragraph' && first.content?.some(node => node.text?.trim()) && first.content.every(node => node.type === 'hardBreak' || (node.type === 'text' && (!node.text?.trim() || node.marks?.some(mark => mark.type === 'em'))))) {
+		if (!forNote && first?.type === 'paragraph' && first.content?.some(node => node.text?.trim()) && first.content.every(node => node.type === 'hardBreak' || (node.type === 'text' && (!node.text?.trim() || node.marks?.some(mark => mark.type === 'em'))))) {
 			subtitle = first.content.map(node => node.type === 'hardBreak' ? ' ' : node.text || '').join('').replace(/\s+/g, ' ').trim();
 			body.shift();
 		}
@@ -125,47 +127,67 @@ export class PostModal extends Modal {
 	onOpen(): void {
 		this.titleEl.setText(t('pluginName'));
 		const newsletters = this.plugin.account?.newsletters || [];
-		if (!newsletters.length) {
+		if (!this.plugin.account) {
 			this.contentEl.createEl('p', { text: t('draftSetupRequired') });
 			return;
 		}
-		let selected = newsletters[0].subdomain;
-		this.contentEl.createEl('p', { text: t('createDraftFromNote', { note: this.file.basename }) });
-		new Setting(this.contentEl).setName(t('newsletter')).addDropdown(dropdown => {
-			dropdown.selectEl.setAttribute('aria-label', t('newsletter'));
+		let selected = newsletters[0]?.subdomain || NOTE_DESTINATION;
+		let submit: ButtonComponent;
+		const description = this.contentEl.createEl('p');
+		const updateDescription = (): void => { description.setText(t(selected === NOTE_DESTINATION ? 'publishNoteFromNote' : 'createDraftFromNote', { note: this.file.basename })); };
+		updateDescription();
+		new Setting(this.contentEl).setName(t('destination')).addDropdown(dropdown => {
+			dropdown.selectEl.setAttribute('aria-label', t('destination'));
+			dropdown.addOption(NOTE_DESTINATION, t('noteDestination'));
 			for (const newsletter of newsletters) dropdown.addOption(newsletter.subdomain, newsletter.name);
-			dropdown.setValue(selected).onChange(value => { selected = value; });
+			dropdown.setValue(selected).onChange(value => {
+				selected = value;
+				submit.setButtonText(t(selected === NOTE_DESTINATION ? 'publishNote' : 'createDraft'));
+				updateDescription();
+			});
 		});
 		const status = this.contentEl.createEl('p', { attr: { role: 'status', 'aria-live': 'polite' } });
-		new Setting(this.contentEl).addButton(button => button.setButtonText(t('createDraft')).setCta().onClick(async () => {
-			button.setDisabled(true);
-			status.setAttribute('role', 'status');
-			status.setText(t('creatingDraft'));
-			try {
-				const newsletter = newsletters.find(item => item.subdomain === selected);
-				const session = this.app.secretStorage.getSecret(this.plugin.settings.sessionSecretId);
-				if (!session || !newsletter) throw new SubstackError(t('reconnectAccount'));
-				const post = await preparePost(this.app, this.file);
-				const url = await createDraft(session, newsletter, post);
-				this.contentEl.empty();
-				this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) });
-				this.contentEl.createEl('a', { text: t('openDraft'), href: url, attr: { target: '_blank', rel: 'noopener' } });
-				const languageStatus = this.contentEl.createEl('p', { text: t('checkingDraftLanguages'), attr: { role: 'status', 'aria-live': 'polite' } });
+		new Setting(this.contentEl).addButton(button => {
+			submit = button;
+			button.setButtonText(t(selected === NOTE_DESTINATION ? 'publishNote' : 'createDraft')).setCta().onClick(async () => {
+				const isNote = selected === NOTE_DESTINATION;
+				button.setDisabled(true);
+				status.setAttribute('role', 'status');
+				status.setText(t(isNote ? 'publishingNote' : 'creatingDraft'));
 				try {
-					const activated = await activateDraftLanguages(session, newsletter, url.slice(url.lastIndexOf('/') + 1), language => {
-						languageStatus.setText(t('activatingDraftLanguage', { language: draftLanguageName(language) }));
-					}, this.plugin.settings.translationLanguages, this.plugin.settings.defaultLanguage);
-					if (activated) languageStatus.setText(t('draftLanguagesReady'));
-					else languageStatus.remove();
-				} catch {
-					languageStatus.setAttribute('role', 'alert');
-					languageStatus.setText(t('draftLanguagesFailed'));
+					const newsletter = newsletters.find(item => item.subdomain === selected);
+					const session = this.app.secretStorage.getSecret(this.plugin.settings.sessionSecretId);
+					if (!session || (!isNote && !newsletter)) throw new SubstackError(t('reconnectAccount'));
+					const post = await preparePost(this.app, this.file, isNote);
+					if (isNote) {
+						const url = await publishNote(session, post.body);
+						this.contentEl.empty();
+						this.contentEl.createEl('p', { text: t('notePublished') });
+						this.contentEl.createEl('a', { text: t('openNote'), href: url, attr: { target: '_blank', rel: 'noopener' } });
+						return;
+					}
+					if (!newsletter) throw new SubstackError(t('invalidNewsletter'));
+					const url = await createDraft(session, newsletter, post);
+					this.contentEl.empty();
+					this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) });
+					this.contentEl.createEl('a', { text: t('openDraft'), href: url, attr: { target: '_blank', rel: 'noopener' } });
+					const languageStatus = this.contentEl.createEl('p', { text: t('checkingDraftLanguages'), attr: { role: 'status', 'aria-live': 'polite' } });
+					try {
+						const activated = await activateDraftLanguages(session, newsletter, url.slice(url.lastIndexOf('/') + 1), language => {
+							languageStatus.setText(t('activatingDraftLanguage', { language: draftLanguageName(language) }));
+						}, this.plugin.settings.translationLanguages, this.plugin.settings.defaultLanguage);
+						if (activated) languageStatus.setText(t('draftLanguagesReady'));
+						else languageStatus.remove();
+					} catch {
+						languageStatus.setAttribute('role', 'alert');
+						languageStatus.setText(t('draftLanguagesFailed'));
+					}
+				} catch (error) {
+					status.setAttribute('role', 'alert');
+					status.setText(error instanceof SubstackError ? error.message : t(isNote ? 'notePublicationUncertain' : 'draftFailed'));
+					button.setDisabled(isNote);
 				}
-			} catch (error) {
-				status.setAttribute('role', 'alert');
-				status.setText(error instanceof SubstackError ? error.message : t('draftFailed'));
-				button.setDisabled(false);
-			}
-		}));
+			});
+		});
 	}
 }

@@ -372,8 +372,12 @@ try {
  assert.equal(await main.evaluate(`[...document.querySelectorAll('.menu-item')].find(node => node.querySelector('.menu-item-title')?.textContent.trim() === 'To Substack')?.querySelector('svg path')?.getAttribute('d')`), iconPath, 'The file menu must display the bundled Substack logo');
  await main.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...postPoint, button: 'left', clickCount: 1 });
  await main.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...postPoint, button: 'left', clickCount: 1 });
- await poll(() => main.evaluate(`document.querySelector('.modal select')?.options.length === 2`), 'Newsletter chooser');
+ await poll(() => main.evaluate(`document.querySelector('.modal select')?.options.length === 3`), 'Note and newsletter destinations');
+ assert.deepEqual(await main.evaluate(`[...document.querySelector('.modal select').options].map(option => option.text)`), ['Note', 'Newsletter principale', 'Deuxième newsletter']);
  // shortcut: The macOS picker needs a manual keyboard check; exercise the real select's change handler here.
+ await main.evaluate(`(() => { const select = document.querySelector('.modal select'); select.value = select.options[0].value; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+ assert.equal(await main.evaluate(`[...document.querySelectorAll('.modal button')].some(button => button.textContent === 'Publier la note')`), true);
+ assert.equal(await main.evaluate(`document.querySelector('.modal').textContent.includes('Publier immédiatement')`), true);
  await main.evaluate(`(() => { const select = document.querySelector('.modal select'); select.value = 'deuxieme-fixture'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
  await poll(() => main.evaluate(`document.querySelector('.modal select').value === 'deuxieme-fixture'`), 'Second newsletter selected');
  const createPoint = await main.evaluate(`(() => { const button = [...document.querySelectorAll('.modal button')].find(node => node.textContent === 'Créer le brouillon'); const box = button.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`);

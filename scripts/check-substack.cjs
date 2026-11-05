@@ -56,7 +56,7 @@ module.exports = (async () => {
 			} };
 		}
 	});
-	const { normalizeSession, parseAccount, getAccount, createDraft, activateDraftLanguages, setLocale } = moduleForCheck.exports;
+	const { normalizeSession, parseAccount, getAccount, createDraft, publishNote, activateDraftLanguages, setLocale } = moduleForCheck.exports;
 	setLocale('fr');
 	const profile = { name: 'Compte de test', publicationUsers: [
 		{ publication: { name: 'Première newsletter', subdomain: 'premiere' } },
@@ -166,6 +166,78 @@ module.exports = (async () => {
 		await assert.rejects(createDraft('token', newsletter, illustratedPost), /image/);
 		assert.equal(requests.length, beforeFailedImage + 1, 'A failed image upload must not create a partial draft or retry automatically');
 	}
+
+	const noteBody = { type: 'doc', content: [
+		{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Title', marks: [{ type: 'strong' }] }] },
+		{ type: 'paragraph', content: [{ type: 'text', text: 'Opening paragraph', marks: [{ type: 'em' }] }] },
+		{ type: 'paragraph', content: [{ type: 'text', text: 'A link', marks: [{ type: 'link', attrs: { href: 'https://example.org/' } }] }, { type: 'hardBreak' }, { type: 'text', text: 'Next line' }] },
+		{ type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Item' }] }] }] }
+	] };
+	const originalNote = JSON.stringify(noteBody);
+	respond = () => ({ status: 200, json: { id: 456 } });
+	assert.equal(await publishNote('token', noteBody), 'https://substack.com/note/c-456');
+	const noteRequest = requests.at(-1);
+	assert.equal(noteRequest.url, 'https://substack.com/api/v1/comment/feed');
+	assert.equal(noteRequest.method, 'POST');
+	assert.equal(noteRequest.headers.Cookie, 'substack.sid=token');
+	const notePayload = JSON.parse(noteRequest.body);
+	assert.deepEqual(notePayload.attachmentIds, []);
+	assert.equal(notePayload.replyMinimumRole, 'everyone');
+	assert.equal(notePayload.bodyJson.attrs.schemaVersion, 'v1');
+	assert.deepEqual(notePayload.bodyJson.content[0], { type: 'paragraph', content: [{ type: 'text', text: 'Title', marks: [{ type: 'bold' }] }] });
+	assert.deepEqual(notePayload.bodyJson.content[1], { type: 'paragraph', content: [{ type: 'text', text: 'Opening paragraph', marks: [{ type: 'italic' }] }] });
+	assert.deepEqual(notePayload.bodyJson.content[2].content[0].marks, noteBody.content[2].content[0].marks);
+	assert.deepEqual(notePayload.bodyJson.content[2].content[1], { type: 'text', text: '\n' });
+	assert.deepEqual(notePayload.bodyJson.content[3], noteBody.content[3]);
+	assert.equal(JSON.stringify(noteBody), originalNote, 'Publishing must preserve the source document');
+	const beforeEmptyNote = requests.length;
+	await assert.rejects(publishNote('token', { type: 'doc', content: [{ type: 'paragraph' }] }), /aucun texte/);
+	await assert.rejects(publishNote('token', { type: 'doc', content: Array.from({ length: 21 }, (_, index) => ({ type: 'image2', attrs: { src: `https://example.org/${index}.png` } })) }), /maximum 20/);
+	await assert.rejects(publishNote('token', { type: 'doc', content: [imageNode, { type: 'image2', attrs: { src: 'data:text/html;base64,AA==' } }] }), /image.*invalide/);
+	assert.equal(requests.length, beforeEmptyNote, 'Invalid Notes must be rejected before uploads or publication');
+	const beforeNoteImages = requests.length;
+	respond = request => {
+		const payload = JSON.parse(request.body);
+		if (request.url.endsWith('/image')) {
+			assert.equal(payload.image, dataUri);
+			return { status: 200, json: { url: 'https://images.example.invalid/note.png' } };
+		}
+		if (request.url.endsWith('/comment/attachment')) {
+			assert.deepEqual(payload, { type: 'image', url: 'https://images.example.invalid/note.png' });
+			return { status: 200, json: { id: 789 } };
+		}
+		assert.equal(request.url, 'https://substack.com/api/v1/comment/feed');
+		assert.deepEqual(payload.attachmentIds, [789]);
+		assert.deepEqual(payload.bodyJson.content, [{ type: 'paragraph' }]);
+		return { status: 200, json: { id: 457 } };
+	};
+	assert.equal(await publishNote('token', { type: 'doc', content: [imageNode, imageNode] }), 'https://substack.com/note/c-457');
+	assert.equal(requests.length, beforeNoteImages + 3, 'Repeated images must be uploaded and attached once');
+	for (const response of [{ status: 500 }, { status: 200, json: { url: 'javascript:alert(1)' } }]) {
+		respond = () => response;
+		const beforeFailure = requests.length;
+		await assert.rejects(publishNote('token', { type: 'doc', content: [imageNode] }), /image.*note n’a pas été publiée/);
+		assert.equal(requests.length, beforeFailure + 1, 'Image failures must stop before note publication');
+	}
+	for (const [response, message] of [
+		[{ status: 401 }, /refusée ou expirée/], [{ status: 403 }, /refusé la publication/],
+		[{ status: 429 }, /trop de demandes/], [{ status: 500 }, /Vérifiez vos Notes/],
+		[{ status: 200, json: {} }, /Vérifiez vos Notes/], [{ status: 200, json: { id: '../456' } }, /Vérifiez vos Notes/]
+	]) {
+		respond = () => response;
+		const beforeFailure = requests.length;
+		await assert.rejects(publishNote('token', noteBody), message);
+		assert.equal(requests.length, beforeFailure + 1, 'Note publication must never retry automatically');
+	}
+	respond = () => { throw Error('Private transport details'); };
+	await assert.rejects(publishNote('token', noteBody), /Vérifiez vos Notes/);
+	respond = () => new Promise(() => {});
+	const noteTimeout = publishNote('token', noteBody);
+	assert.equal(timers.size, 1);
+	[...timers.values()][0]();
+	await assert.rejects(noteTimeout, /Vérifiez vos Notes/);
+	assert.equal(timers.size, 0);
+	console.log('Substack Notes: text formatting, images, validation, publication errors and no automatic retries pass.');
 
 	const progress = [];
 	respond = () => ({ status: 200, json: { additional_post_languages_enabled: false } });

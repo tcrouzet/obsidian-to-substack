@@ -74,6 +74,7 @@ export function parseAccount(value: unknown): SubstackAccount {
 
 async function request(session: string, options: RequestUrlParam, timeoutMs = 15000): Promise<unknown> {
 	const cookie = normalizeSession(session);
+	const publishingNote = options.url === 'https://substack.com/api/v1/comment/feed';
 	let response;
 	let timeout: number | undefined;
 	try {
@@ -82,37 +83,85 @@ async function request(session: string, options: RequestUrlParam, timeoutMs = 15
 			headers: { 'Content-Type': 'application/json', ...options.headers, Cookie: cookie },
 			throw: false
 		}), new Promise<never>((_resolve, reject) => {
-			timeout = window.setTimeout(() => reject(new SubstackError(options.method === 'POST' ? t('draftCreationUncertain') : t('substackTimeout'))), timeoutMs);
+			timeout = window.setTimeout(() => reject(new SubstackError(options.method === 'POST' ? t(publishingNote ? 'notePublicationUncertain' : 'draftCreationUncertain') : t('substackTimeout'))), timeoutMs);
 		})]);
 	} catch (error) {
 		if (error instanceof SubstackError) throw error;
-		if (options.method === 'POST') throw new SubstackError(t('draftCreationUncertain'));
+		if (options.method === 'POST') throw new SubstackError(t(publishingNote ? 'notePublicationUncertain' : 'draftCreationUncertain'));
 		throw new SubstackError(t('substackConnectionFailed'));
 	} finally {
 		if (timeout !== undefined) window.clearTimeout(timeout);
 	}
 	if (response.status === 401 || response.status === 403) {
-		if (options.method === 'POST' && response.status === 403) throw new SubstackError(t('draftPermissionDenied'), response.status);
+		if (options.method === 'POST' && response.status === 403) throw new SubstackError(t(publishingNote ? 'notePermissionDenied' : 'draftPermissionDenied'), response.status);
 		throw new SubstackError(t('sessionExpired'), response.status);
 	}
 	if (response.status === 429) {
 		throw new SubstackError(t('tooManyRequests'));
 	}
 	if (response.status < 200 || response.status >= 300) {
-		if (options.method === 'POST') throw new SubstackError(t('draftCreationUnconfirmed'));
+		if (options.method === 'POST') throw new SubstackError(t(publishingNote ? 'notePublicationUncertain' : 'draftCreationUnconfirmed'));
 		throw new SubstackError(t('substackUnavailable'));
 	}
 	try {
 		const result: unknown = response.json;
 		return result;
 	} catch {
-		if (options.method === 'POST') throw new SubstackError(t('draftResponseUnreadable'));
+		if (options.method === 'POST') throw new SubstackError(t(publishingNote ? 'notePublicationUncertain' : 'draftResponseUnreadable'));
 		throw new SubstackError(t('responseUnreadable'));
 	}
 }
 
 export async function getAccount(session: string): Promise<SubstackAccount> {
 	return parseAccount(await request(session, { url: 'https://substack.com/api/v1/user/profile/self', method: 'GET' }));
+}
+
+export async function publishNote(session: string, body: PostNode): Promise<string> {
+	const images = new Set<string>();
+	let hasText = false;
+	const convert = (node: PostNode): PostNode | null => {
+		if (node.type === 'image2') {
+			const src = node.attrs?.src;
+			if (typeof src !== 'string') throw new SubstackError(t('imageEmbedFailed'));
+			if (src.startsWith('data:')) {
+				if (!/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/]+={0,2}$/i.test(src)) throw new SubstackError(t('invalidEncodedImage'));
+			} else {
+				const url = new URL(src);
+				if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new SubstackError(t('imageEmbedFailed'));
+			}
+			images.add(src);
+			return null;
+		}
+		if (node.text?.trim()) hasText = true;
+		if (node.type === 'hardBreak') return { type: 'text', text: '\n' };
+		if (node.type === 'horizontal_rule') return { type: 'paragraph', content: [{ type: 'text', text: '---' }] };
+		const content = node.content?.map(convert).filter((child): child is PostNode => child !== null);
+		const marks = node.marks?.map(mark => ({ ...mark, type: mark.type === 'strong' ? 'bold' : mark.type === 'em' ? 'italic' : mark.type }));
+		if (node.type === 'heading') return { type: 'paragraph', content: content?.map(child => child.type === 'text' && !child.marks?.some(mark => mark.type === 'bold') ? { ...child, marks: [...child.marks || [], { type: 'bold' }] } : child) };
+		if (node.type === 'doc') return { type: 'doc', attrs: { schemaVersion: 'v1' }, content: content?.length ? content : [{ type: 'paragraph' }] };
+		return { ...node, ...(content ? { content } : {}), ...(marks ? { marks } : {}) };
+	};
+	const bodyJson = convert(body);
+	if (!hasText && !images.size) throw new SubstackError(t('emptyNote'));
+	if (images.size > 20) throw new SubstackError(t('tooManyNoteImages'));
+	const attachmentIds: (string | number)[] = [];
+	for (const image of images) {
+		try {
+			const uploaded = await request(session, { url: 'https://substack.com/api/v1/image', method: 'POST', body: JSON.stringify({ image }) });
+			if (!isRecord(uploaded) || typeof uploaded.url !== 'string') throw new Error();
+			const url = new URL(uploaded.url);
+			if (url.protocol !== 'https:' || url.username || url.password) throw new Error();
+			const attachment = await request(session, { url: 'https://substack.com/api/v1/comment/attachment', method: 'POST', body: JSON.stringify({ type: 'image', url: url.href }) });
+			if (!isRecord(attachment) || !['string', 'number'].includes(typeof attachment.id) || !/^[a-zA-Z0-9_-]+$/.test(String(attachment.id))) throw new Error();
+			attachmentIds.push(attachment.id as string | number);
+		} catch { throw new SubstackError(t('noteImageUploadFailed')); }
+	}
+	const result = await request(session, {
+		url: 'https://substack.com/api/v1/comment/feed', method: 'POST',
+		body: JSON.stringify({ bodyJson, attachmentIds, replyMinimumRole: 'everyone' })
+	});
+	if (!isRecord(result) || !['string', 'number'].includes(typeof result.id) || !/^[1-9][0-9]*$/.test(String(result.id))) throw new SubstackError(t('notePublicationUncertain'));
+	return `https://substack.com/note/c-${String(result.id)}`;
 }
 
 export const DRAFT_LANGUAGES = ['en', 'es', 'de', 'it', 'pt', 'fr'] as const;
