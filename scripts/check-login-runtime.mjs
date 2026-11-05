@@ -19,7 +19,7 @@ await fs.mkdir(profile);
 for (const name of ['manifest.json', 'styles.css']) await fs.copyFile(name, path.join(destination, name));
 const bundle = await fs.readFile('main.js', 'utf8');
 const iconPath = (await fs.readFile('icon.svg', 'utf8')).match(/<path d="([^"]+)"/)[1];
-const postBundle = buildSync({ stdin: { contents: "export * from './plugin/post'; export * from './plugin/i18n'; export * from './plugin/settings'; export { MarkdownPreviewRenderer } from 'obsidian';", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'cjs', external: ['obsidian'] }).outputFiles[0].text;
+const postBundle = buildSync({ stdin: { contents: "export * from './plugin/post'; export * from './plugin/i18n'; export * from './plugin/settings'; export { MarkdownPreviewRenderer, Menu } from 'obsidian';", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'cjs', external: ['obsidian'] }).outputFiles[0].text;
 const prefix = `const hostRequire = require;
 const host = hostRequire('obsidian');
 globalThis.toSubstackTestRequests = [];
@@ -119,6 +119,88 @@ async function clickButton(label) {
  await settings.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
  await settings.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
 }
+async function checkExportOptions() {
+ const result = await main.evaluate(`(${(async function () {
+  const { preparePost } = globalThis.toSubstackUiCheck;
+  const source = '---\nmetadescription: >-\n  YAML description\n  on two lines.\n---\n# Article title\n\nBody with #inside.\n\n#carnets #y2026 #2026-11-2-10h00\n';
+  const file = await app.vault.create('Export metadata.md', source);
+  const regular = await preparePost(app, file);
+  const cleaned = await preparePost(app, file, { removeTrailingTags: true });
+  const note = await preparePost(app, file, { forNote: true, removeTrailingTags: true });
+  const italicFile = await app.vault.create('Export italic.md', '---\nmetadescription: YAML description\n---\n# Title\n\n*Italic subtitle.*\n\nBody.');
+  const italic = await preparePost(app, italicFile);
+  const protectedFile = await app.vault.create('Export code tags.md', 'Text.\n\n`#keep-code`\n\n```\n#keep-fenced\n```');
+  const protectedTags = await preparePost(app, protectedFile, { removeTrailingTags: true });
+  const multipleFile = await app.vault.create('Export multiple tags.md', 'Body.\n\n#first  \n#second\n\n#last');
+  const multiple = await preparePost(app, multipleFile, { removeTrailingTags: true });
+  const selectionSource = 'OUTSIDE\n\nOnly **this**.\n\n![[missing-unselected.png]]';
+  const selectionFile = await app.vault.create('Export selection.md', selectionSource);
+  const selection = await preparePost(app, selectionFile, { forNote: true, selection: 'Only **this**.\n\n![[assets/pixel test.png]]\n\n#selected', removeTrailingTags: true });
+  const whitespace = await preparePost(app, selectionFile, { forNote: true, selection: '   ' });
+  const rawSelection = await preparePost(app, selectionFile, { forNote: true, selection: '---\nRaw selection\n---' });
+  return { regular, cleaned, note, italic, protectedTags, multiple, selection, whitespace, rawSelection,
+   original: await app.vault.read(file), source };
+ }).toString()})()`);
+ assert.equal(result.regular.subtitle, 'YAML description on two lines.');
+ assert.equal(result.italic.subtitle, 'Italic subtitle.');
+ assert.equal(JSON.stringify(result.italic.body).includes('Italic subtitle.'), false);
+ assert.equal(JSON.stringify(result.regular.body).includes('#carnets'), true);
+ assert.equal(JSON.stringify(result.cleaned.body).includes('#carnets'), false);
+ assert.equal(JSON.stringify(result.cleaned.body).includes('#inside'), true);
+ assert.equal(result.note.subtitle, '');
+ assert.equal(result.note.body.content[0].type, 'heading');
+ assert.equal(JSON.stringify(result.protectedTags.body).includes('#keep-code'), true);
+ assert.equal(JSON.stringify(result.protectedTags.body).includes('#keep-fenced'), true);
+ assert.equal(result.multiple.body.content.length, 1);
+ assert.equal(JSON.stringify(result.selection.body).includes('OUTSIDE'), false);
+ assert.equal(JSON.stringify(result.selection.body).includes('#selected'), false);
+ assert.ok(result.selection.body.content.some(node => node.type === 'image2'));
+ assert.deepEqual(result.whitespace.body.content, [{ type: 'paragraph' }]);
+ assert.equal(JSON.stringify(result.rawSelection.body).includes('Raw selection'), true);
+ assert.equal(result.original, result.source);
+ await main.evaluate(`(async () => {
+  app.setting.close();
+  const electron = window.require('electron');
+  const remote = electron.remote ?? electron;
+  const mainWindow = remote.BrowserWindow.getAllWindows().find(win => win.webContents.getURL() === 'app://obsidian.md/index.html');
+  for (const win of remote.BrowserWindow.getAllWindows()) if (win.id !== mainWindow.id) win.close();
+  remote.app.focus({ steal: true });
+  mainWindow.show(); mainWindow.focus();
+  const leaf = app.workspace.getLeaf(true);
+  globalThis.toSubstackExportLeaf = leaf;
+  await leaf.openFile(app.vault.getFileByPath('Export selection.md'), { state: { mode: 'source' } });
+  app.workspace.setActiveLeaf(leaf, { focus: true });
+ })()`);
+ try {
+  for (const [event, selected, expected] of [
+   ['editor-menu', true, ['Note']], ['file-menu', true, ['Note']],
+   ['editor-menu', false, ['Note', 'Newsletter principale', 'Deuxième newsletter']]
+  ]) {
+   const state = await main.evaluate(`(() => {
+    const view = globalThis.toSubstackExportLeaf.view;
+    view.editor.setSelection({ line: 2, ch: 0 }, { line: 2, ch: ${selected ? 'Only **this**.'.length : 0} });
+    const menu = new globalThis.toSubstackUiCheck.Menu();
+    if (${JSON.stringify(event)} === 'editor-menu') app.workspace.trigger('editor-menu', menu, view.editor, view);
+    else app.workspace.trigger('file-menu', menu, view.file, 'file-explorer-context-menu', globalThis.toSubstackExportLeaf);
+    const item = menu.items.find(item => item.titleEl.textContent.trim() === 'To Substack');
+    if (!item) throw Error('To Substack menu item missing');
+    const state = { selection: view.editor.getSelection(), newsletters: app.plugins.getPlugin('to-substack').account.newsletters.map(newsletter => newsletter.name) };
+    view.editor.setCursor({ line: 0, ch: 0 });
+    item.callback(new MouseEvent('click'));
+    return state;
+   })()`);
+   assert.equal(state.selection, selected ? 'Only **this**.' : '');
+   assert.deepEqual(state.newsletters, ['Newsletter principale', 'Deuxième newsletter']);
+   const options = await poll(() => main.evaluate(`(() => { const select = document.querySelector('.modal select'); return select ? [...select.options].map(option => option.text) : null; })()`), `${event} destinations`);
+   assert.deepEqual(options, expected, `${event}, selected=${selected}`);
+   await main.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+   await main.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+   await poll(() => main.evaluate(`!document.querySelector('.modal select')`), 'Export dialog closed');
+  }
+ } finally { await main.evaluate(`globalThis.toSubstackExportLeaf.detach(); delete globalThis.toSubstackExportLeaf;`); }
+ console.log('Native export: selected-text destinations, YAML fallback, italic priority, trailing tags and source preservation pass.');
+}
+
 try {
  const port = await poll(async () => Number((await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]), 'Debugging port');
  const pages = async () => (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -273,7 +355,7 @@ try {
  })()`);
  if (!saved.stored) console.error('STORED COOKIE NAMES', JSON.stringify(saved.cookieNames));
  delete saved.cookieNames;
- assert.deepEqual(saved, { keys: ['sessionSecretId', 'defaultLanguage', 'translationLanguages'], reference: 'obsidian-to-substack-session', stored: true });
+ assert.deepEqual(saved, { keys: ['sessionSecretId', 'defaultLanguage', 'translationLanguages', 'removeTrailingTags'], reference: 'obsidian-to-substack-session', stored: true });
 
  await main.evaluate(`globalThis.toSubstackTestDenied = true`);
  await clickButton('Actualiser');
@@ -416,6 +498,10 @@ try {
  assert.equal(JSON.stringify(postBody).includes('Ignorer les propriétés'), false);
  await main.evaluate(`globalThis.toSubstackFinishDraft()`);
  await poll(() => main.evaluate(`document.querySelector('.modal a')?.getAttribute('href') === 'https://deuxieme-fixture.substack.com/publish/post/123'`), 'Created draft link');
+ await main.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+ await main.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+ await poll(() => main.evaluate(`!document.querySelector('.modal')`), 'Draft dialog closed');
+ await checkExportOptions();
  const fallbackPost = await main.evaluate(`(async () => {
   const file = await app.vault.create('Sans titre.md', 'Un paragraphe *partiellement* en italique.\\n\\nLa suite.');
   return globalThis.toSubstackPreparePost(app, file);
@@ -487,7 +573,7 @@ try {
   new ui.PostModal(plugin, app.vault.getFileByPath('Test.md')).open();
   return { headings: definitions.map(group => group.heading), status: definitions[0].items[0].name };
  })()`);
- assert.deepEqual(englishSettings.headings, ['Substack account', 'Newsletters', 'Language editions', 'Manual connection']);
+ assert.deepEqual(englishSettings.headings, ['Substack account', 'Newsletters', 'Language editions', 'Export', 'Manual connection']);
  assert.equal(englishSettings.status, 'Connected to Compte de test');
  const englishCreate = await poll(() => main.evaluate(`(() => {
   const button = [...document.querySelectorAll('.modal button')].find(node => node.textContent === 'Create draft');

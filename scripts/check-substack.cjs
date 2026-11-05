@@ -319,6 +319,7 @@ module.exports = (async () => {
 	assert.equal(plugin.account, null);
 	assert.equal(plugin.settings.translationLanguages.join(','), 'en,es,de,it,pt,fr');
 	assert.equal(plugin.settings.defaultLanguage, 'fr');
+	assert.equal(plugin.settings.removeTrailingTags, false);
 	const languageSettings = plugin.tab.getSettingDefinitions()[2].items;
 	assert.equal(languageSettings[0].control.type, 'dropdown');
 	assert.equal(languageSettings[0].control.key, 'defaultLanguage');
@@ -330,9 +331,12 @@ module.exports = (async () => {
 	await plugin.connect(false);
 	assert.equal(plugin.account.newsletters.length, 2);
 	assert.equal(plugin.tab.getSettingDefinitions()[1].items.length, 2);
-	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId,defaultLanguage,translationLanguages');
+	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId,defaultLanguage,translationLanguages,removeTrailingTags');
 	assert.equal(JSON.stringify(plugin.saved).includes('fixture-session'), false);
 	const connectedAccount = plugin.account;
+	await plugin.tab.setControlValue('removeTrailingTags', true);
+	assert.equal(plugin.saved.removeTrailingTags, true);
+	assert.equal(plugin.account, connectedAccount, 'Export preferences must preserve the connection');
 	await plugin.tab.setControlValue('defaultLanguage', 'de');
 	assert.equal(plugin.saved.defaultLanguage, 'de');
 	assert.equal(plugin.account, connectedAccount, 'Choosing the default language must keep the account connected');
@@ -349,6 +353,13 @@ module.exports = (async () => {
 	assert.equal(plugin.saved.translationLanguages.join(','), 'de,it', 'Disconnecting must preserve language preferences');
 	assert.equal(plugin.saved.defaultLanguage, 'de');
 	assert.equal(secrets.get('session-importee'), 'fixture-session', 'Imported shared secrets belong to the user');
+	assert.equal(plugin.saved.removeTrailingTags, true, 'Disconnecting must preserve export preferences');
+	for (const [stored, expected] of [[true, true], [false, false], ['true', false]]) {
+		const reloaded = new moduleForCheck.exports.default();
+		reloaded.saved = { removeTrailingTags: stored };
+		await reloaded.onload();
+		assert.equal(reloaded.settings.removeTrailingTags, expected);
+	}
 	for (const [savedPreferences, expected, expectedDefault] of [
 		[{ sessionSecretId: '' }, 'en,es,de,it,pt,fr', 'fr'],
 		[{ defaultLanguage: 'it', translationLanguages: ['it', 'de', 'it', 'unknown', null] }, 'de,it', 'it'],

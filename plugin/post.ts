@@ -1,5 +1,5 @@
 import { draftLanguageName, t } from './i18n';
-import { App, arrayBufferToBase64, ButtonComponent, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, Setting, TFile } from 'obsidian';
+import { App, arrayBufferToBase64, ButtonComponent, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, Setting, TFile } from 'obsidian';
 import type ToSubstackPlugin from './main';
 import { activateDraftLanguages, createDraft, publishNote, PostContent, PostNode, SubstackError } from './substack';
 
@@ -98,35 +98,54 @@ function blocks(parent: Element): PostNode[] {
 	return result;
 }
 
-export async function preparePost(app: App, file: TFile, forNote = false): Promise<PostContent> {
-	const markdown = await app.vault.read(file);
+export async function preparePost(app: App, file: TFile, options: { forNote?: boolean; selection?: string; removeTrailingTags?: boolean } = {}): Promise<PostContent> {
+	const markdown = options.selection ?? await app.vault.read(file);
+	const frontmatter = options.selection === undefined ? getFrontMatterInfo(markdown) : null;
 	const container = createDiv();
 	const component = new Component();
 	component.load();
 	try {
-		await MarkdownRenderer.render(app, markdown.slice(getFrontMatterInfo(markdown).contentStart), container, file.path, component);
+		await MarkdownRenderer.render(app, markdown.slice(frontmatter?.contentStart ?? 0), container, file.path, component);
 		await encodeImages(app, file, container);
 		container.querySelectorAll('button, .collapse-indicator, .heading-collapse-indicator, .list-collapse-indicator').forEach(node => node.remove());
-		const heading = forNote ? null : container.querySelector('h1');
+		const heading = options.forNote ? null : container.querySelector('h1');
 		const title = heading?.textContent?.trim() || file.basename;
 		heading?.remove();
 		const body = blocks(container);
+		if (options.removeTrailingTags) {
+			const isTag = (node: PostNode): boolean => node.type === 'hardBreak' || node.type === 'text' && (!node.text?.trim()
+				|| (/^#[^\s#]+$/.test(node.text) && node.marks?.some(mark => mark.type === 'link' && mark.attrs?.href?.startsWith('#')) === true));
+			while (body.length) {
+				const last = body[body.length - 1];
+				if (last.type !== 'paragraph' || !last.content?.length || !last.content.every(isTag)) break;
+				body.pop();
+			}
+		}
 		const first = body[0];
 		let subtitle = '';
-		if (!forNote && first?.type === 'paragraph' && first.content?.some(node => node.text?.trim()) && first.content.every(node => node.type === 'hardBreak' || (node.type === 'text' && (!node.text?.trim() || node.marks?.some(mark => mark.type === 'em'))))) {
+		if (!options.forNote && first?.type === 'paragraph' && first.content?.some(node => node.text?.trim()) && first.content.every(node => node.type === 'hardBreak' || (node.type === 'text' && (!node.text?.trim() || node.marks?.some(mark => mark.type === 'em'))))) {
 			subtitle = first.content.map(node => node.type === 'hardBreak' ? ' ' : node.text || '').join('').replace(/\s+/g, ' ').trim();
 			body.shift();
+		}
+		if (!options.forNote && !subtitle && frontmatter?.exists) {
+			let metadata: unknown;
+			try { metadata = parseYaml(frontmatter.frontmatter); }
+			catch { throw new SubstackError(t('invalidFrontmatter')); }
+			if (metadata && typeof metadata === 'object' && 'metadescription' in metadata) {
+				const description = (metadata as Record<string, unknown>).metadescription;
+				if (typeof description === 'string') subtitle = description.replace(/\s+/g, ' ').trim();
+			}
 		}
 		return { title, subtitle, body: { type: 'doc', content: body.length ? body : [{ type: 'paragraph' }] } };
 	} finally { component.unload(); }
 }
 
 export class PostModal extends Modal {
-	constructor(private plugin: ToSubstackPlugin, private file: TFile) { super(plugin.app); }
+	constructor(private plugin: ToSubstackPlugin, private file: TFile, private selectedMarkdown?: string) { super(plugin.app); }
 
 	onOpen(): void {
 		this.titleEl.setText(t('pluginName'));
-		const newsletters = this.plugin.account?.newsletters || [];
+		const newsletters = this.selectedMarkdown === undefined ? this.plugin.account?.newsletters || [] : [];
 		if (!this.plugin.account) {
 			this.contentEl.createEl('p', { text: t('draftSetupRequired') });
 			return;
@@ -134,7 +153,7 @@ export class PostModal extends Modal {
 		let selected = newsletters[0]?.subdomain || NOTE_DESTINATION;
 		let submit: ButtonComponent;
 		const description = this.contentEl.createEl('p');
-		const updateDescription = (): void => { description.setText(t(selected === NOTE_DESTINATION ? 'publishNoteFromNote' : 'createDraftFromNote', { note: this.file.basename })); };
+		const updateDescription = (): void => { description.setText(this.selectedMarkdown !== undefined ? t('publishSelectedText') : t(selected === NOTE_DESTINATION ? 'publishNoteFromNote' : 'createDraftFromNote', { note: this.file.basename })); };
 		updateDescription();
 		new Setting(this.contentEl).setName(t('destination')).addDropdown(dropdown => {
 			dropdown.selectEl.setAttribute('aria-label', t('destination'));
@@ -158,7 +177,7 @@ export class PostModal extends Modal {
 					const newsletter = newsletters.find(item => item.subdomain === selected);
 					const session = this.app.secretStorage.getSecret(this.plugin.settings.sessionSecretId);
 					if (!session || (!isNote && !newsletter)) throw new SubstackError(t('reconnectAccount'));
-					const post = await preparePost(this.app, this.file, isNote);
+					const post = await preparePost(this.app, this.file, { forNote: isNote, selection: this.selectedMarkdown, removeTrailingTags: this.plugin.settings.removeTrailingTags });
 					if (isNote) {
 						const url = await publishNote(session, post.body);
 						this.contentEl.empty();

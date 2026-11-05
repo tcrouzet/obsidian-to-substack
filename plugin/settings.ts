@@ -87,6 +87,15 @@ export class SubstackSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: t('exportSettings'),
+				items: [{
+					name: t('removeTrailingTags'),
+					desc: t('removeTrailingTagsHelp'),
+					control: { type: 'toggle', key: 'removeTrailingTags' }
+				}]
+			},
+			{
+				type: 'group',
 				heading: t('manualConnection'),
 				items: [{
 					name: t('substackSession'),

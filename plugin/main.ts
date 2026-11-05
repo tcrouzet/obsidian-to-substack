@@ -1,5 +1,5 @@
 import { setLocale, t } from './i18n';
-import { addIcon, getLanguage, Notice, Plugin, TFile } from 'obsidian';
+import { addIcon, getLanguage, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
 import substackIcon from '../icon.svg';
 import { PostModal } from './post';
 import { SubstackLogin } from './auth';
@@ -9,7 +9,7 @@ import { DRAFT_LANGUAGES, DraftLanguage, getAccount, SubstackAccount, SubstackEr
 const SESSION_SECRET = 'obsidian-to-substack-session';
 
 export default class ToSubstackPlugin extends Plugin {
-	settings = { sessionSecretId: '', defaultLanguage: 'en' as DraftLanguage, translationLanguages: [...DRAFT_LANGUAGES] };
+	settings = { sessionSecretId: '', defaultLanguage: 'en' as DraftLanguage, translationLanguages: [...DRAFT_LANGUAGES], removeTrailingTags: false };
 	account: SubstackAccount | null = null;
 	activity = '';
 	error = '';
@@ -39,13 +39,24 @@ export default class ToSubstackPlugin extends Plugin {
 			if (defaultLanguage) this.settings.defaultLanguage = defaultLanguage;
 			const languages = data.translationLanguages;
 			if (Array.isArray(languages)) this.settings.translationLanguages = DRAFT_LANGUAGES.filter(language => languages.includes(language));
+			if (typeof data.removeTrailingTags === 'boolean') this.settings.removeTrailingTags = data.removeTrailingTags;
 		}
 		this.settingsTab = new SubstackSettingTab(this.app, this);
 		this.addSettingTab(this.settingsTab);
 		this.register(() => this.cancelConnection());
 		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
-			if (file instanceof TFile && file.extension === 'md') menu.addItem(item => item
-				.setTitle(t('pluginName')).setIcon('to-substack').onClick(() => { new PostModal(this, file).open(); }));
+			if (!(file instanceof TFile) || file.extension !== 'md') return;
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			const selection = view?.file?.path === file.path ? view.editor.getSelection() || undefined : undefined;
+			menu.addItem(item => item.setTitle(t('pluginName')).setIcon('to-substack')
+				.onClick(() => { new PostModal(this, file, selection).open(); }));
+		}));
+		this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, info) => {
+			if (!info.file || info.file.extension !== 'md') return;
+			const file = info.file;
+			const selection = editor.getSelection() || undefined;
+			menu.addItem(item => item.setTitle(t('pluginName')).setIcon('to-substack')
+				.onClick(() => { new PostModal(this, file, selection).open(); }));
 		}));
 		if (this.settings.sessionSecretId && this.app.secretStorage.getSecret(this.settings.sessionSecretId)) {
 			void this.connect(false);

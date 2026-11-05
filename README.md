@@ -44,12 +44,12 @@ The plugin waits for Substack to generate the editions, then checks that they we
 | In your note | In the Substack draft |
 | --- | --- |
 | The first level-one heading, `# Title` | Post title |
-| The opening paragraph, if it is entirely italic | Subtitle |
+| The opening paragraph, if it is entirely italic; otherwise YAML `metadescription`, when present | Subtitle |
 | The remaining text | Formatted post body |
 | Embedded images | Images in the post body |
 | YAML properties | Excluded from the export |
 
-If the note has no level-one heading, its filename without `.md` becomes the title. The extracted title and subtitle are removed from the exported body. Paragraphs, headings, bold, italics, web links, lists, blockquotes, inline code, code blocks, and horizontal rules keep their formatting.
+If the note has no level-one heading, its filename without `.md` becomes the title. The extracted title and opening italic paragraph are removed from the exported body. If there is no italic opening paragraph, the YAML `metadescription` property supplies the subtitle. Paragraphs, headings, bold, italics, web links, lists, blockquotes, inline code, code blocks, and horizontal rules keep their formatting.
 
 For example:
 
@@ -80,9 +80,15 @@ If an image cannot be found or uploaded, the plugin stops before creating the dr
 3. Click **Publish note**. This publishes immediately to the connected account's Notes feed.
 4. Follow **Open note in Substack** to view it.
 
+To publish an excerpt, select text in the editor and choose **To Substack** from its context menu. Only **Note** is offered, and only the selected text and its images are sent. Without a selection, the destination chooser offers Note and your newsletters.
+
 The title and opening italic paragraph remain in the Note's text. Headings become bold paragraphs; lists, quotes, links, and code retain their formatting. Images appear as gallery attachments, with a maximum of 20 unique images. Notes use Substack's own layout rather than inline image positions. Language edition settings apply to newsletter drafts.
 
 If Substack does not confirm publication, check your Notes before trying again. The plugin never retries publication automatically.
+
+## Remove trailing tags
+
+Enable **Settings → To Substack → Export → Remove trailing tags** to omit paragraphs containing only hashtags at the end of an article or Note. The option is off by default. Tags within the text and tags in code are preserved; your Obsidian file stays unchanged.
 
 ## Account and privacy
 
@@ -101,41 +107,6 @@ A session cookie grants access to your account. Keep it private.
 - The automatic sign-in window is available on desktop. Mobile requires manual session setup; the mobile workflow has not yet been validated on iOS or Android.
 - Tables and embedded files other than images, including PDFs, audio, video, and embedded notes, are not supported.
 - To Substack uses Substack's undocumented API. Changes to Substack may affect the connection, draft creation, or Note publication.
-
-## Install from the terminal
-
-Requires **Bash and curl**: on macOS or Linux, or on Windows with Git Bash.
-
-Close Obsidian, replace `/path/to/My vault` with your vault's path, and run:
-
-```bash
-(
-  set -eu
-  cd "/path/to/My vault/.obsidian"
-  download_dir=$(mktemp -d)
-  trap 'rm -rf -- "$download_dir"' EXIT
-
-  for file in main.js manifest.json styles.css; do
-    curl -fL "https://github.com/tcrouzet/obsidian-to-substack/releases/latest/download/$file" \
-      -o "$download_dir/$file"
-  done
-
-  mkdir -p plugins/to-substack
-  cp "$download_dir/"* plugins/to-substack/
-)
-```
-
-The downloads finish before the installed plugin files are replaced. Your notes, attachments, and existing plugin settings are preserved. If your vault uses a different configuration folder, replace `.obsidian` in the command.
-
-Reopen Obsidian and enable **To Substack** in **Settings → Community plugins**. To update, close Obsidian and run the same commands again.
-
-## Install manually
-
-1. Open the [latest release](https://github.com/tcrouzet/obsidian-to-substack/releases/latest) and download `main.js`, `manifest.json`, and `styles.css`.
-2. Create `.obsidian/plugins/to-substack/` inside your vault and place those files in it.
-3. Restart Obsidian and enable **To Substack** in **Settings → Community plugins**.
-
-On macOS, press `Cmd+Shift+.` in Finder to show hidden folders. If you use a custom configuration folder, replace `.obsidian` with its name.
 
 ## Questions or ideas?
 
