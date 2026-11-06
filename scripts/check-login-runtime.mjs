@@ -119,6 +119,25 @@ async function clickButton(label) {
  await settings.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
  await settings.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
 }
+async function observeLoginLifecycle() {
+ await main.evaluate(`(() => {
+  const win = app.plugins.getPlugin('to-substack').login.authWindow;
+  const request = win.webContents.session.webRequest;
+  const remove = request.onBeforeRequest.bind(request);
+  const destroy = win.destroy.bind(win);
+  const electron = window.require('electron');
+  const parent = (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId);
+  const state = globalThis.toSubstackLoginLifecycle = { detached: false };
+  request.onBeforeRequest = listener => { state.detached = listener === null; return remove(listener); };
+  win.destroy = () => {
+   state.detachedBeforeDestroy = state.detached;
+   state.hiddenBeforeDestroy = !win.isVisible();
+   state.parentFocusedBeforeDestroy = parent.isFocused();
+   destroy();
+  };
+ })()`);
+}
+
 async function checkExportOptions() {
  const result = await main.evaluate(`(${(async function () {
   const { preparePost } = globalThis.toSubstackUiCheck;
@@ -258,6 +277,7 @@ try {
  await poll(() => main.evaluate(`(() => { const electron = window.require('electron'); return (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId)?.isFocused(); })()`), 'Settings window focused before login');
  await clickButton('Se connecter');
  await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack').busy`), 'Login operation');
+ await observeLoginLifecycle();
  const sandbox = await main.evaluate(`(() => {
   const electron = window.require('electron');
   const login = app.plugins.getPlugin('to-substack').login.authWindow;
@@ -343,6 +363,7 @@ try {
  await main.evaluate(`globalThis.toSubstackTestDenied = false`);
  await main.evaluate(`app.plugins.getPlugin('to-substack').login.authWindow.webContents.executeJavaScript('history.pushState({}, "", "/home"); true')`);
  await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack').account?.newsletters.length === 2`), 'Captured session and newsletters');
+ assert.deepEqual(await main.evaluate(`globalThis.toSubstackLoginLifecycle`), { detached: true, detachedBeforeDestroy: true, hiddenBeforeDestroy: true, parentFocusedBeforeDestroy: true }, 'Login cleanup must finish after detaching network callbacks and returning focus to settings');
  assert.equal(await main.evaluate(`(() => { const electron = window.require('electron'); return !!(electron.remote ?? electron).BrowserWindow.fromId(${originalLoginId}); })()`), false, 'Completed login must close even when the page refuses unload');
  await poll(() => main.evaluate(`(() => { const electron = window.require('electron'); return (electron.remote ?? electron).BrowserWindow.fromId(globalThis.toSubstackSettingsWindowId)?.isFocused(); })()`), 'Return to the settings window after authentication');
  await poll(async () => (await text()).includes('Deuxième newsletter'), 'Newsletter settings rendering');

@@ -36,6 +36,7 @@ interface LoginWindow {
 	isMinimized(): boolean;
 	restore(): void;
 	show(): void;
+	hide(): void;
 	focus(): void;
 	destroy(): void;
 }
@@ -58,6 +59,7 @@ interface ElectronRemote {
 export class SubstackLogin {
 	private authWindow: LoginWindow | null = null;
 	private app?: ElectronRemote['app'];
+	private cancel: (() => void) | null = null;
 
 	get isOpen(): boolean {
 		return this.authWindow !== null && !this.authWindow.isDestroyed();
@@ -73,7 +75,7 @@ export class SubstackLogin {
 	}
 
 	close(): void {
-		if (this.authWindow && !this.authWindow.isDestroyed()) this.authWindow.destroy();
+		this.cancel?.();
 	}
 
 	open(): Promise<LoginResult | null> {
@@ -129,18 +131,29 @@ export class SubstackLogin {
 				finished = true;
 				window.clearInterval(interval);
 				cookies.removeListener('changed', cookieChanged);
-				if (this.authWindow === authWindow) this.authWindow = null;
-				// Only the disposable login window is destroyed; the page cannot veto its dismissal.
-				if (!authWindow.isDestroyed()) authWindow.destroy();
 				webRequest.onBeforeRequest(null);
+				if (this.authWindow === authWindow) {
+					this.authWindow = null;
+					this.cancel = null;
+				}
+				if (!authWindow.isDestroyed()) authWindow.hide();
 				if (result && settingsWindow && !settingsWindow.isDestroyed()) {
 					if (settingsWindow.isMinimized()) settingsWindow.restore();
 					this.app?.focus({ steal: true });
 					settingsWindow.show();
 					settingsWindow.focus();
 				}
-				if (error) reject(error);
-				else resolve(result);
+				// Let native focus events run before destroying the login window.
+				window.setTimeout(() => {
+					try {
+						if (!authWindow.isDestroyed()) authWindow.destroy();
+					} catch {
+						reject(new SubstackError(t('sessionReadFailed')));
+						return;
+					}
+					if (error) reject(error);
+					else resolve(result);
+				}, 0);
 			};
 			const checkCookies = (): void => {
 				if (finished || checking) return;
@@ -167,6 +180,7 @@ export class SubstackLogin {
 			};
 			// Authentication can complete on the server without another cookie or navigation event.
 			const interval = window.setInterval(checkCookies, 2000);
+			this.cancel = () => finish(null);
 			cookies.on('changed', cookieChanged);
 			authWindow.on('closed', () => finish(null));
 			authWindow.webContents.on('will-prevent-unload', () => finish(null));
