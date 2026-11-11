@@ -188,8 +188,6 @@ export class PostModal extends Modal {
 					if (!newsletter) throw new SubstackError(t('invalidNewsletter'));
 					const url = await createDraft(session, newsletter, post);
 					this.contentEl.empty();
-					this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) });
-					this.contentEl.createEl('a', { text: t('openDraft'), href: url, attr: { target: '_blank', rel: 'noopener' } });
 					const languageStatus = this.contentEl.createEl('p', { text: t('checkingDraftLanguages'), attr: { role: 'status', 'aria-live': 'polite' } });
 					try {
 						const activated = await activateDraftLanguages(session, newsletter, url.slice(url.lastIndexOf('/') + 1), language => {
@@ -201,6 +199,10 @@ export class PostModal extends Modal {
 						languageStatus.setAttribute('role', 'alert');
 						languageStatus.setText(t('draftLanguagesFailed'));
 					}
+					this.contentEl.prepend(
+						this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) }),
+						this.contentEl.createEl('a', { text: t('openDraft'), href: url, attr: { target: '_blank', rel: 'noopener' } })
+					);
 				} catch (error) {
 					status.setAttribute('role', 'alert');
 					status.setText(error instanceof SubstackError ? error.message : t(isNote ? 'notePublicationUncertain' : 'draftFailed'));

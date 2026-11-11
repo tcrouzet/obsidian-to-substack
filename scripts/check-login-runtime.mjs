@@ -30,7 +30,7 @@ globalThis.toSubstackPendingResponses = [];
 globalThis.toSubstackDrafts = [];
 globalThis.toSubstackImageUploads = [];
 const fixtureApi = { ...host, requestUrl: async options => {
- if (options.method === 'GET' && ['https://premiere-fixture.substack.com/api/v1/publication_settings', 'https://deuxieme-fixture.substack.com/api/v1/publication_settings'].includes(options.url)) return { status: 200, json: { additional_post_languages_enabled: false } };
+ if (options.method === 'GET' && ['https://premiere-fixture.substack.com/api/v1/publication_settings', 'https://deuxieme-fixture.substack.com/api/v1/publication_settings'].includes(options.url)) return new Promise(resolve => { globalThis.toSubstackFinishLanguages = resolve; });
  if (options.method === 'POST' && ['https://premiere-fixture.substack.com/api/v1/image', 'https://deuxieme-fixture.substack.com/api/v1/image'].includes(options.url)) {
   globalThis.toSubstackImageUploads.push({ url: options.url, contentType: options.headers['Content-Type'], image: new URLSearchParams(options.body).get('image') });
   if (globalThis.toSubstackImageFailure) return { status: 500 };
@@ -518,6 +518,10 @@ try {
  assert.equal(JSON.stringify(postBody).includes('Un titre'), false);
  assert.equal(JSON.stringify(postBody).includes('Ignorer les propriétés'), false);
  await main.evaluate(`globalThis.toSubstackFinishDraft()`);
+ await poll(() => main.evaluate(`typeof globalThis.toSubstackFinishLanguages === 'function'`), 'Language processing started');
+ assert.equal(await main.evaluate(`Boolean(document.querySelector('.modal a'))`), false, 'The draft link must wait until language processing finishes');
+ assert.equal(await main.evaluate(`document.querySelector('.modal').textContent.includes('Brouillon «')`), false, 'Draft success must wait until language processing finishes');
+ await main.evaluate(`globalThis.toSubstackFinishLanguages({ status: 200, json: { additional_post_languages_enabled: false } })`);
  await poll(() => main.evaluate(`document.querySelector('.modal a')?.getAttribute('href') === 'https://deuxieme-fixture.substack.com/publish/post/123'`), 'Created draft link');
  await main.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
  await main.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
