@@ -14,6 +14,7 @@ export default class ToSubstackPlugin extends Plugin {
 	activity = '';
 	error = '';
 	private operation = 0;
+	private connection: Promise<void> = Promise.resolve();
 	private login = new SubstackLogin();
 	private settingsTab: SubstackSettingTab;
 
@@ -71,11 +72,16 @@ export default class ToSubstackPlugin extends Plugin {
 		this.error = '';
 	}
 
-	async connect(useBrowser: boolean): Promise<void> {
+	connect(useBrowser: boolean): Promise<void> {
 		if (this.busy) {
 			if (useBrowser) this.login.focus();
-			return;
+			return this.connection;
 		}
+		this.connection = this.loadAccount(useBrowser);
+		return this.connection;
+	}
+
+	private async loadAccount(useBrowser: boolean): Promise<void> {
 		const operation = ++this.operation;
 		this.activity = useBrowser ? t('signingIn') : t('loadingNewsletters');
 		this.error = '';

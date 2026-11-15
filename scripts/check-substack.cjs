@@ -379,11 +379,14 @@ module.exports = (async () => {
 	const connecting = plugin.connect(false);
 	assert.equal(plugin.busy, true);
 	const before = requests.length;
-	await plugin.connect(false);
+	let reusedConnectionFinished = false;
+	const reusedConnection = plugin.connect(false).then(() => { reusedConnectionFinished = true; });
+	await Promise.resolve();
 	assert.equal(requests.length, before, 'Concurrent clicks must not duplicate requests');
+	assert.equal(reusedConnectionFinished, false, 'A caller reusing a connection must wait for the account');
 	plugin.cleanup();
 	finish({ status: 200, json: profile });
-	await connecting;
+	await Promise.all([connecting, reusedConnection]);
 	assert.equal(plugin.account, null, 'An unloaded plugin must ignore a late profile response');
 	assert.equal(plugin.busy, false);
 	respond = () => ({ status: 401 });

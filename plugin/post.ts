@@ -143,11 +143,17 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 export class PostModal extends Modal {
 	constructor(private plugin: ToSubstackPlugin, private file: TFile, private selectedMarkdown?: string) { super(plugin.app); }
 
-	onOpen(): void {
+	async onOpen(): Promise<void> {
 		this.titleEl.setText(t('pluginName'));
+		if (!this.plugin.account && this.plugin.settings.sessionSecretId) {
+			this.contentEl.createEl('p', { text: t('loadingNewsletters'), attr: { role: 'status' } });
+			await this.plugin.connect(false);
+			if (!this.modalEl.isConnected) return;
+			this.contentEl.empty();
+		}
 		const newsletters = this.selectedMarkdown === undefined ? this.plugin.account?.newsletters || [] : [];
 		if (!this.plugin.account) {
-			this.contentEl.createEl('p', { text: t('draftSetupRequired') });
+			this.contentEl.createEl('p', { text: this.plugin.error || t('draftSetupRequired'), attr: { role: 'alert' } });
 			return;
 		}
 		let selected = newsletters[0]?.subdomain || NOTE_DESTINATION;

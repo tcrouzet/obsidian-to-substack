@@ -138,6 +138,80 @@ async function observeLoginLifecycle() {
  })()`);
 }
 
+async function checkSessionReuse() {
+ await main.evaluate(`(async () => {
+  app.setting.close();
+  const remote = window.require('electron').remote;
+  const win = remote.BrowserWindow.getAllWindows().find(win => win.webContents.getURL() === 'app://obsidian.md/index.html');
+  remote.app.focus({ steal: true }); win.show(); win.focus();
+  const plugin = app.plugins.getPlugin('to-substack');
+  plugin.cancelConnection();
+  globalThis.toSubstackPreviousLanguages = plugin.settings.translationLanguages;
+  plugin.settings.translationLanguages = [];
+  globalThis.toSubstackReuseFile = await app.vault.create('Session reuse.md', '# Saved session\\n\\nA second draft.');
+  globalThis.toSubstackTestPending = true;
+  globalThis.toSubstackReuseRequestCount = globalThis.toSubstackTestRequests.length;
+  globalThis.toSubstackReuseDraftCount = globalThis.toSubstackDrafts.length;
+  globalThis.toSubstackReuseModal = new globalThis.toSubstackUiCheck.PostModal(plugin, globalThis.toSubstackReuseFile);
+  globalThis.toSubstackReuseModal.open();
+ })()`);
+ await poll(() => main.evaluate(`globalThis.toSubstackPendingResponses.length > 0`), 'Saved session reused when opening a post');
+ assert.equal(await main.evaluate(`!!document.querySelector('.modal [role="status"]')`), true, 'Show progress while restoring the account');
+ await main.evaluate(`(() => { globalThis.toSubstackTestPending = false; globalThis.toSubstackPendingResponses.splice(0).forEach(resolve => resolve()); })()`);
+ for (let index = 0; index < 2; index++) {
+  await poll(() => main.evaluate(`document.querySelector('.modal select')?.options.length === 3`), 'Saved session restores newsletter choices');
+  await main.evaluate(`(() => { globalThis.toSubstackFinishDraft = null; document.querySelector('.modal button.mod-cta').click(); })()`);
+  await poll(() => main.evaluate(`!!globalThis.toSubstackFinishDraft`), 'Draft submitted using saved session');
+  await main.evaluate(`globalThis.toSubstackFinishDraft()`);
+  await poll(() => main.evaluate(`!!document.querySelector('.modal a[href$="/publish/post/123"]')`), 'Draft confirmed');
+  await main.evaluate(`globalThis.toSubstackReuseModal.close()`);
+  if (index === 0) await main.evaluate(`(() => {
+   globalThis.toSubstackReuseModal = new globalThis.toSubstackUiCheck.PostModal(app.plugins.getPlugin('to-substack'), globalThis.toSubstackReuseFile);
+   globalThis.toSubstackReuseModal.open();
+  })()`);
+ }
+ assert.deepEqual(await main.evaluate(`({
+  profiles: globalThis.toSubstackTestRequests.length - globalThis.toSubstackReuseRequestCount,
+  drafts: globalThis.toSubstackDrafts.length - globalThis.toSubstackReuseDraftCount,
+  login: app.plugins.getPlugin('to-substack').hasLoginWindow
+ })`), { profiles: 1, drafts: 2, login: false });
+ await main.evaluate(`(() => {
+  const plugin = app.plugins.getPlugin('to-substack');
+  plugin.cancelConnection();
+  globalThis.toSubstackTestPending = true;
+  globalThis.toSubstackBackgroundConnection = plugin.connect(false);
+  globalThis.toSubstackReuseModal = new globalThis.toSubstackUiCheck.PostModal(plugin, globalThis.toSubstackReuseFile);
+  globalThis.toSubstackReuseModal.open();
+ })()`);
+ assert.equal(await main.evaluate(`!!document.querySelector('.modal [role="status"]') && !document.querySelector('.modal select')`), true, 'Wait for an existing connection');
+ await main.evaluate(`(async () => {
+  globalThis.toSubstackReuseModal.close();
+  globalThis.toSubstackTestPending = false;
+  globalThis.toSubstackPendingResponses.splice(0).forEach(resolve => resolve());
+  await globalThis.toSubstackBackgroundConnection;
+ })()`);
+ assert.equal(await main.evaluate(`globalThis.toSubstackReuseModal.contentEl.children.length`), 1, 'Closing during connection must prevent destination rendering');
+ await main.evaluate(`(() => {
+  const plugin = app.plugins.getPlugin('to-substack');
+  plugin.cancelConnection();
+  globalThis.toSubstackTestDenied = true;
+  globalThis.toSubstackReuseModal = new globalThis.toSubstackUiCheck.PostModal(plugin, globalThis.toSubstackReuseFile);
+  globalThis.toSubstackReuseModal.open();
+ })()`);
+ await poll(() => main.evaluate(`(() => {
+  const plugin = app.plugins.getPlugin('to-substack');
+  return !!plugin.error && !plugin.account && document.querySelector('.modal [role="alert"]')?.textContent === plugin.error;
+ })()`), 'Rejected saved session displays the actual error');
+ assert.equal(await main.evaluate(`app.plugins.getPlugin('to-substack').hasLoginWindow`), false, 'An expired session must not open a login window automatically');
+ await main.evaluate(`(async () => {
+  globalThis.toSubstackReuseModal.close();
+  globalThis.toSubstackTestDenied = false;
+  await app.plugins.getPlugin('to-substack').connect(false);
+ })()`);
+ await main.evaluate(`app.plugins.getPlugin('to-substack').settings.translationLanguages = globalThis.toSubstackPreviousLanguages`);
+ console.log('Native session reuse: two drafts without browser login, pending connection, closed dialog and expired session pass.');
+}
+
 async function checkExportOptions() {
  const result = await main.evaluate(`(${(async function () {
   const { preparePost } = globalThis.toSubstackUiCheck;
@@ -595,7 +669,8 @@ try {
   ui.setLocale('en');
   const plugin = app.plugins.getPlugin('to-substack');
   const definitions = new ui.SubstackSettingTab(app, plugin).getSettingDefinitions();
-  new ui.PostModal(plugin, app.vault.getFileByPath('Test.md')).open();
+  globalThis.toSubstackEnglishModal = new ui.PostModal(plugin, app.vault.getFileByPath('Test.md'));
+  globalThis.toSubstackEnglishModal.open();
   return { headings: definitions.map(group => group.heading), status: definitions[0].items[0].name };
  })()`);
  assert.deepEqual(englishSettings.headings, ['Substack account', 'Newsletters', 'Language editions', 'Export', 'Manual connection']);
@@ -610,6 +685,8 @@ try {
  await main.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...englishCreate, button: 'left', clickCount: 1 });
  await poll(() => main.evaluate(`Array.from(document.querySelectorAll('.modal [role="alert"]')).some(node => node.textContent === 'Could not upload an image to Substack. The draft was not created.')`), 'English image upload error');
  assert.equal(await main.evaluate(`globalThis.toSubstackDrafts.length`), 1, 'The English dialog must also stop before creating a partial draft');
+ await main.evaluate(`globalThis.toSubstackEnglishModal.close()`);
+ await checkSessionReuse();
  console.log(JSON.stringify({ status: 'PASS', localImageEncoding: true, imageUpload: true, relativeImages: true, htmlImages: true, noteDraft: true, internalSubstackNavigation: true, foreignNavigationBlocked: true, nativeSettings: true, nativeSecretControl: true, desktopSessionCapture: true, returnToMinimizedLogin: true, newsletterList: true, visibleErrorAndRetry: true, disconnect: true, beforeUnloadDismissed: true, spaLogin: true, automaticReturnWithoutBrowserEvent: true, hiddenSettingsRestored: true, pendingRequestCancellation: true, retryAfterCancellation: true, nativeWindowClose: true, otherTabsClickable: true, settingsClosable: true, loginSandbox: sandbox, authenticatedSubstackRequests: false }));
 } catch (error) {
  console.error(error);
