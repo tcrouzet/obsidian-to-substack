@@ -138,13 +138,18 @@ export async function getSections(session: string, newsletter: Newsletter): Prom
 	return available;
 }
 
-export async function publishDraft(session: string, newsletter: Newsletter, draftId: string, sectionId: number | null, sendEmail: boolean): Promise<string> {
+export async function saveDraftSection(session: string, newsletter: Newsletter, draftId: string, sectionId: number | null): Promise<void> {
 	if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(newsletter.subdomain) || !/^[a-zA-Z0-9_-]+$/.test(draftId)) throw new SubstackError(t('invalidNewsletter'));
 	if (sectionId !== null && (!Number.isSafeInteger(sectionId) || sectionId <= 0)) throw new SubstackError(t('invalidCategory'));
 	const url = `https://${newsletter.subdomain}.substack.com/api/v1/drafts/${draftId}`;
 	const saved = await request(session, { url, method: 'PUT', body: JSON.stringify({ draft_section_id: sectionId, section_chosen: true }) });
 	if (!isRecord(saved) || String(saved.id) !== draftId || saved.draft_section_id !== sectionId) throw new SubstackError(t('categorySaveFailed'));
-	await request(session, { url: `${url}/publish`, method: 'POST', body: JSON.stringify({ send: sendEmail, share_automatically: false }) });
+}
+
+export async function publishDraft(session: string, newsletter: Newsletter, draftId: string, sectionId: number | null): Promise<string> {
+	await saveDraftSection(session, newsletter, draftId, sectionId);
+	const url = `https://${newsletter.subdomain}.substack.com/api/v1/drafts/${draftId}`;
+	await request(session, { url: `${url}/publish`, method: 'POST', body: JSON.stringify({ send: true, share_automatically: false }) });
 	try {
 		const published = await request(session, { url, method: 'GET' });
 		if (!isRecord(published) || String(published.id) !== draftId || published.is_published !== true || typeof published.slug !== 'string' || !published.slug.trim()) throw new Error();

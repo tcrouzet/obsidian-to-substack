@@ -40,7 +40,8 @@ const fixtureApi = { ...host, requestUrl: async options => {
   const update = JSON.parse(options.body);
   globalThis.toSubstackSectionUpdates.push(update);
   globalThis.toSubstackDraftSection = update.draft_section_id;
-  return { status: 200, json: { id: 123, draft_section_id: update.draft_section_id } };
+  if (globalThis.toSubstackHoldSectionUpdate) await new Promise(resolve => { globalThis.toSubstackFinishSection = resolve; });
+  return { status: 200, json: { id: 123, draft_section_id: globalThis.toSubstackSectionFailure ? 99 : update.draft_section_id } };
  }
  if (options.method === 'POST' && options.url === 'https://premiere-fixture.substack.com/api/v1/drafts/123/publish') {
   globalThis.toSubstackPublishRequests.push(JSON.parse(options.body));
@@ -174,12 +175,18 @@ async function checkPublicationControls() {
   plugin.settings.translationLanguages = ['en', 'fr'];
   plugin.settings.defaultLanguage = 'en';
   plugin.account = { name: 'Fixture account', newsletters: [{ name: 'Fixture newsletter', subdomain: 'premiere-fixture' }] };
+  globalThis.toSubstackOriginalOpen = window.open;
+  window.open = url => { globalThis.toSubstackOpenedDrafts.push(url); return null; };
  })()`);
- for (const scenario of ['category', 'email', 'failure']) {
+ for (const scenario of ['open', 'category', 'without-category', 'failure', 'save-failure']) {
   await main.evaluate(`(() => {
    globalThis.toSubstackPublishRequests = [];
    globalThis.toSubstackSectionUpdates = [];
-   globalThis.toSubstackSections = ${scenario === 'email' ? '[]' : '[{id:7,name:"Essays",is_live:true}]'};
+   globalThis.toSubstackSections = ${scenario === 'without-category' ? '[]' : '[{id:7,name:"Essays",is_live:true}]'};
+   globalThis.toSubstackOpenedDrafts = [];
+   globalThis.toSubstackHoldSectionUpdate = ${scenario === 'open'};
+   globalThis.toSubstackSectionFailure = ${scenario === 'save-failure'};
+   globalThis.toSubstackFinishSection = null;
    globalThis.toSubstackPublishFailure = ${scenario === 'failure'};
    globalThis.toSubstackFinishDraft = null;
    globalThis.toSubstackFinishLanguages = null;
@@ -194,29 +201,87 @@ async function checkPublicationControls() {
   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button')`), false, 'No publish button while languages are pending');
   await main.evaluate(`globalThis.toSubstackFinishLanguages({status:200,json:{additional_post_languages_enabled:false}})`);
   await poll(() => main.evaluate(`[...globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('.modal button')].some(button => button.textContent === globalThis.toSubstackUiCheck.t('publishDraft'))`), 'Publish controls ready');
-  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal select')`), scenario !== 'email', 'Only show categories when they exist');
-  assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.checkbox-container').classList.contains('is-enabled')`), true, 'Email must default to on');
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('select')`), scenario !== 'without-category', 'Only show categories when they exist');
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.checkbox-container')`), false, 'There is no email option');
+  assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).at(-1).textContent`), await main.evaluate(`globalThis.toSubstackUiCheck.t('openDraft')`), 'Open draft must be last');
   await main.evaluate(`(() => {
    const select = globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal select');
    if(select) {select.value='7';select.dispatchEvent(new Event('change',{bubbles:true}));}
-   ${scenario !== 'email' ? "globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal .checkbox-container').click();" : ''}
-   const button=globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta');button.click();button.click();
+   const buttons=Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button'));
+   const button=buttons.find(button=>button.textContent===globalThis.toSubstackUiCheck.t(${JSON.stringify(scenario === 'open' || scenario === 'save-failure' ? 'openDraft' : 'publishDraft')}));
+   button.click();button.click();
   })()`);
+  if (scenario === 'open') {
+   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishSection`), 'Save category before opening');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), [{draft_section_id:7,section_chosen:true}]);
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`), []);
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.isConnected`), true, 'Keep the window open until the category is saved');
+   await main.evaluate(`globalThis.toSubstackFinishSection()`);
+   await poll(() => main.evaluate(`!globalThis.toSubstackPublicationModal.modalEl.isConnected`), 'Open draft closes the plugin window');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`), ['https://premiere-fixture.substack.com/publish/post/123']);
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`), 0, 'Viewing the draft must not publish it');
+   continue;
+  }
+  if (scenario === 'save-failure') {
+   await poll(() => main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('[role="alert"]')?.textContent === globalThis.toSubstackUiCheck.t('categorySaveFailed')`), 'Category save failure');
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.isConnected`), true);
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`), []);
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`), 0);
+   await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
+   continue;
+  }
   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishPublish`), 'Publish request sent');
-  assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), [{draft_section_id:scenario === 'email' ? null : 7,section_chosen:true}]);
-  assert.deepEqual(await main.evaluate(`globalThis.toSubstackPublishRequests`), [{send:scenario === 'email',share_automatically:false}]);
+  assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), [{draft_section_id:scenario === 'without-category' ? null : 7,section_chosen:true}]);
+  assert.deepEqual(await main.evaluate(`globalThis.toSubstackPublishRequests`), [{send:true,share_automatically:false}]);
   assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta').disabled`), true, 'Prevent duplicate publication');
   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/p/published-article"]')`), false, 'Wait for publication confirmation');
   await main.evaluate(`globalThis.toSubstackFinishPublish()`);
   if (scenario === 'failure') {
    await poll(() => main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal [role="alert"]')?.textContent === globalThis.toSubstackUiCheck.t('draftPublicationUncertain')`), 'Uncertain publication error');
-   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/publish/post/123"]')`), true, 'Retain the draft link after an error');
    await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta').click()`);
    assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`), 1, 'An uncertain publication must not be retried');
+   await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('openDraft')).click()`);
+   await poll(() => main.evaluate(`!globalThis.toSubstackPublicationModal.modalEl.isConnected`), 'Review uncertain publication and close');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`), ['https://premiere-fixture.substack.com/publish/post/123']);
   } else await poll(() => main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/p/published-article"]')`), 'Published article link');
   await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
  }
- console.log('Publication UI: categories, email enabled by default, language ordering, confirmation, duplicate clicks and failure recovery pass.');
+ await main.evaluate(`window.open = globalThis.toSubstackOriginalOpen`);
+ console.log('Publication UI: category saved, open draft last and close, web and email publishing, duplicate clicks and failure recovery pass.');
+}
+
+async function checkFrontmatterTitle() {
+ const result = await main.evaluate(`(${(async function () {
+  const prepare = globalThis.toSubstackPreparePost;
+  const title = 'Été & lumière';
+  const source = '---\ntitle: ' + JSON.stringify('  ' + title + '  ') + '\nimage: assets/pixel%20test.png\n---\n# Body heading\n\n*Subtitle.*\n\nBody text.';
+  const file = await app.vault.create('Frontmatter title.md', source);
+  const article = await prepare(app, file);
+  const note = await prepare(app, file, { forNote: true });
+  const sameFile = await app.vault.create('Frontmatter matching title.md', source.replace('# Body heading', '# ' + title));
+  const matching = await prepare(app, sameFile, { forNote: true });
+  const selection = await prepare(app, file, { forNote: true, selection: 'Only this excerpt.' });
+  const fallbacks = [];
+  for (const [index, value] of ['', '   ', 42].entries()) {
+   const fallbackFile = await app.vault.create('Frontmatter title fallback ' + index + '.md', '---\ntitle: ' + JSON.stringify(value) + '\n---\n# Heading fallback\n\nBody.');
+   fallbacks.push(await prepare(app, fallbackFile));
+  }
+  return { title, article, note, matching, selection, fallbacks, source, original: await app.vault.read(file) };
+ }).toString()})()`);
+ assert.equal(result.article.title, result.title, 'YAML title takes priority over the first heading');
+ assert.equal(result.article.subtitle, 'Subtitle.');
+ assert.equal(result.article.body.content[0].type, 'image2');
+ assert.equal(result.note.title, result.title);
+ assert.deepEqual(result.note.body.content[0], { type: 'paragraph', content: [{ type: 'text', text: result.title, marks: [{ type: 'strong' }] }] });
+ assert.equal(result.note.body.content[1].type, 'image2', 'The image follows the bold Note title');
+ assert.equal(result.note.body.content[2].type, 'heading', 'Keep a different body heading');
+ const countTitle = node => Number(node.text === result.title) + (node.content || []).reduce((sum, child) => sum + countTitle(child), 0);
+ assert.equal(countTitle(result.matching.body), 1, 'Do not duplicate a matching heading');
+ for (const fallback of result.fallbacks) assert.equal(fallback.title, 'Heading fallback');
+ assert.equal(result.selection.body.content.length, 1);
+ assert.equal(result.selection.body.content[0].content[0].text, 'Only this excerpt.');
+ assert.equal(result.original, result.source);
+ console.log('YAML titles: article priority, bold Note heading, matching heading deduplication, images, fallback and selected text pass.');
 }
 
 async function checkFrontmatterImage() {
@@ -358,7 +423,7 @@ async function checkSessionReuse() {
   await main.evaluate(`(() => { globalThis.toSubstackFinishDraft = null; document.querySelector('.modal button.mod-cta').click(); })()`);
   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishDraft`), 'Draft submitted using saved session');
   await main.evaluate(`globalThis.toSubstackFinishDraft()`);
-  await poll(() => main.evaluate(`!!document.querySelector('.modal a[href$="/publish/post/123"]')`), 'Draft confirmed');
+  await poll(() => main.evaluate(`Array.from(document.querySelectorAll('.modal button')).some(button=>button.textContent===globalThis.toSubstackUiCheck.t('openDraft'))`), 'Draft confirmed');
   await main.evaluate(`globalThis.toSubstackReuseModal.close()`);
   if (index === 0) await main.evaluate(`(() => {
    globalThis.toSubstackReuseModal = new globalThis.toSubstackUiCheck.PostModal(app.plugins.getPlugin('to-substack'), globalThis.toSubstackReuseFile);
@@ -762,7 +827,7 @@ try {
  const drafts = await main.evaluate(`globalThis.toSubstackDrafts`);
  assert.equal(drafts.length, 1, 'Repeated clicks must not create duplicate posts');
  assert.equal(drafts[0].url, 'https://deuxieme-fixture.substack.com/api/v1/drafts');
- assert.equal(drafts[0].body.draft_title, 'Un titre en gras');
+ assert.equal(drafts[0].body.draft_title, 'Ignorer les propriétés');
  assert.equal(drafts[0].body.draft_subtitle, 'Un chapeau avec un lien.');
  const postBody = JSON.parse(drafts[0].body.draft_body);
  const imageUploads = await main.evaluate(`globalThis.toSubstackImageUploads`);
@@ -794,10 +859,10 @@ try {
  assert.equal(JSON.stringify(postBody).includes('Ignorer les propriétés'), false);
  await main.evaluate(`globalThis.toSubstackFinishDraft()`);
  await poll(() => main.evaluate(`typeof globalThis.toSubstackFinishLanguages === 'function'`), 'Language processing started');
- assert.equal(await main.evaluate(`Boolean(document.querySelector('.modal a'))`), false, 'The draft link must wait until language processing finishes');
+ assert.equal(await main.evaluate(`Array.from(document.querySelectorAll('.modal button')).some(button=>button.textContent===globalThis.toSubstackUiCheck.t('openDraft'))`), false, 'Opening the draft must wait until language processing finishes');
  assert.equal(await main.evaluate(`document.querySelector('.modal').textContent.includes('Brouillon «')`), false, 'Draft success must wait until language processing finishes');
  await main.evaluate(`globalThis.toSubstackFinishLanguages({ status: 200, json: { additional_post_languages_enabled: false } })`);
- await poll(() => main.evaluate(`document.querySelector('.modal a')?.getAttribute('href') === 'https://deuxieme-fixture.substack.com/publish/post/123'`), 'Created draft link');
+ await poll(() => main.evaluate(`Array.from(document.querySelectorAll('.modal button')).some(button=>button.textContent===globalThis.toSubstackUiCheck.t('openDraft'))`), 'Open created draft action');
  await main.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
  await main.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
  await poll(() => main.evaluate(`!document.querySelector('.modal')`), 'Draft dialog closed');
@@ -893,6 +958,7 @@ try {
  await checkImageCaptions();
  await checkLinkedImages();
  await checkFrontmatterImage();
+ await checkFrontmatterTitle();
  await checkSessionReuse();
  await checkPublicationControls();
  console.log(JSON.stringify({ status: 'PASS', localImageEncoding: true, imageUpload: true, relativeImages: true, htmlImages: true, noteDraft: true, internalSubstackNavigation: true, foreignNavigationBlocked: true, nativeSettings: true, nativeSecretControl: true, desktopSessionCapture: true, returnToMinimizedLogin: true, newsletterList: true, visibleErrorAndRetry: true, disconnect: true, beforeUnloadDismissed: true, spaLogin: true, automaticReturnWithoutBrowserEvent: true, hiddenSettingsRestored: true, pendingRequestCancellation: true, retryAfterCancellation: true, nativeWindowClose: true, otherTabsClickable: true, settingsClosable: true, loginSandbox: sandbox, authenticatedSubstackRequests: false }));

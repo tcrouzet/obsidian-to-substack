@@ -56,7 +56,7 @@ module.exports = (async () => {
 			} };
 		}
 	});
-	const { normalizeSession, parseAccount, getAccount, createDraft, publishNote, activateDraftLanguages, getSections, publishDraft, setLocale } = moduleForCheck.exports;
+	const { normalizeSession, parseAccount, getAccount, createDraft, publishNote, activateDraftLanguages, getSections, saveDraftSection, publishDraft, setLocale } = moduleForCheck.exports;
 	setLocale('fr');
 	const profile = { name: 'Compte de test', publicationUsers: [
 		{ publication: { name: 'Première newsletter', subdomain: 'premiere' } },
@@ -182,20 +182,25 @@ module.exports = (async () => {
 		respond = () => ({ status: 200, json: invalid });
 		await assert.rejects(getSections('token', newsletter), /catégories/);
 	}
-	for (const [sectionId, sendEmail] of [[7, false], [null, true]]) {
+	respond = () => ({ status: 200, json: { id: 123, draft_section_id: 7 } });
+	const beforeSaveSection = requests.length;
+	await saveDraftSection('token', newsletter, '123', 7);
+	assert.deepEqual(requests.slice(beforeSaveSection).map(request => request.method), ['PUT'], 'Opening a draft saves its category without publishing');
+	assert.deepEqual(JSON.parse(requests.at(-1).body), { draft_section_id: 7, section_chosen: true });
+	for (const sectionId of [7, null]) {
 		respond = request => ({ status: 200, json: request.method === 'PUT' ? { id: 123, draft_section_id: sectionId } : { id: 123, slug: 'published-article', is_published: true } });
 		const beforePublish = requests.length;
-		assert.equal(await publishDraft('token', newsletter, '123', sectionId, sendEmail), 'https://choisie.substack.com/p/published-article');
+		assert.equal(await publishDraft('token', newsletter, '123', sectionId), 'https://choisie.substack.com/p/published-article');
 		const publicationRequests = requests.slice(beforePublish);
 		assert.deepEqual(publicationRequests.map(request => request.method), ['PUT', 'POST', 'GET']);
 		assert.deepEqual(JSON.parse(publicationRequests[0].body), { draft_section_id: sectionId, section_chosen: true });
 		assert.equal(publicationRequests[1].url, 'https://choisie.substack.com/api/v1/drafts/123/publish');
-		assert.deepEqual(JSON.parse(publicationRequests[1].body), { send: sendEmail, share_automatically: false });
+		assert.deepEqual(JSON.parse(publicationRequests[1].body), { send: true, share_automatically: false });
 		assert.equal(publicationRequests[2].url, 'https://choisie.substack.com/api/v1/drafts/123');
 	}
 	respond = () => ({ status: 200, json: { id: 123, draft_section_id: 99 } });
 	const beforeSectionFailure = requests.length;
-	await assert.rejects(publishDraft('token', newsletter, '123', 7, false), /catégorie/);
+	await assert.rejects(publishDraft('token', newsletter, '123', 7), /catégorie/);
 	assert.equal(requests.length, beforeSectionFailure + 1, 'An unconfirmed category must prevent publication');
 	for (const failure of ['network', 'response', 'confirmation']) {
 		respond = request => {
@@ -205,14 +210,14 @@ module.exports = (async () => {
 			return { status: 200, json: { id: 123, slug: 'not-published', is_published: false } };
 		};
 		const beforePublishFailure = requests.length;
-		await assert.rejects(publishDraft('token', newsletter, '123', null, false), /publication/);
+		await assert.rejects(publishDraft('token', newsletter, '123', null), /publication/);
 		assert.equal(requests.slice(beforePublishFailure).filter(request => request.method === 'POST').length, 1, 'Never retry an uncertain publication');
 	}
 	const beforeInvalidPublication = requests.length;
-	await assert.rejects(publishDraft('token', newsletter, '../123', null, false), /Newsletter invalide/);
-	await assert.rejects(publishDraft('token', newsletter, '123', -1, false), /Catégorie invalide\./);
+	await assert.rejects(publishDraft('token', newsletter, '../123', null), /Newsletter invalide/);
+	await assert.rejects(publishDraft('token', newsletter, '123', -1), /Catégorie invalide\./);
 	assert.equal(requests.length, beforeInvalidPublication);
-	console.log('Draft publication: categories, explicit email choice, saved category confirmation, publication read-back and no retries pass.');
+	console.log('Draft publication: saved categories, draft review without publishing, web and email publication, confirmation and no retries pass.');
 
 	const noteBody = { type: 'doc', content: [
 		{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Title', marks: [{ type: 'strong' }] }] },

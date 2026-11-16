@@ -1,7 +1,7 @@
 import { draftLanguageName, t } from './i18n';
-import { App, arrayBufferToBase64, ButtonComponent, Component, DropdownComponent, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, requestUrl, Setting, TFile, ToggleComponent } from 'obsidian';
+import { App, arrayBufferToBase64, ButtonComponent, Component, DropdownComponent, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, requestUrl, Setting, TFile } from 'obsidian';
 import type ToSubstackPlugin from './main';
-import { activateDraftLanguages, createDraft, getSections, Newsletter, publishDraft, publishNote, PostContent, PostNode, SubstackError } from './substack';
+import { activateDraftLanguages, createDraft, getSections, Newsletter, publishDraft, publishNote, PostContent, PostNode, saveDraftSection, SubstackError } from './substack';
 
 const NOTE_DESTINATION = ':note';
 
@@ -142,9 +142,11 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 			if (duplicate) cover = null;
 		}
 		container.querySelectorAll('button, .collapse-indicator, .heading-collapse-indicator, .list-collapse-indicator').forEach(node => node.remove());
-		const heading = options.forNote ? null : container.querySelector('h1');
-		const title = heading?.textContent?.trim() || file.basename;
-		heading?.remove();
+		const yamlTitle = typeof properties.title === 'string' ? properties.title.trim() : '';
+		const heading = container.querySelector('h1');
+		const headingTitle = heading?.textContent?.trim() || '';
+		const title = yamlTitle || (!options.forNote ? headingTitle : '') || file.basename;
+		if (!options.forNote || (yamlTitle && headingTitle === yamlTitle)) heading?.remove();
 		const body = blocks(container, !options.forNote);
 		if (options.removeTrailingTags) {
 			const isTag = (node: PostNode): boolean => node.type === 'hardBreak' || node.type === 'text' && (!node.text?.trim()
@@ -165,6 +167,7 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 			subtitle = properties.metadescription.replace(/\s+/g, ' ').trim();
 		}
 		if (cover) body.unshift(...inline(cover, [], !options.forNote));
+		if (options.forNote && yamlTitle) body.unshift({ type: 'paragraph', content: [{ type: 'text', text: yamlTitle, marks: [{ type: 'strong' }] }] });
 		return { title, subtitle, body: { type: 'doc', content: body.length ? body : [{ type: 'paragraph' }] } };
 	} finally { component.unload(); }
 }
@@ -234,10 +237,7 @@ export class PostModal extends Modal {
 						languageStatus.setAttribute('role', 'alert');
 						languageStatus.setText(t('draftLanguagesFailed'));
 					}
-					this.contentEl.prepend(
-						this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) }),
-						this.contentEl.createEl('a', { text: t('openDraft'), href: url, attr: { target: '_blank', rel: 'noopener' } })
-					);
+					this.contentEl.prepend(this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) }));
 					await this.showPublicationControls(session, newsletter, url.slice(url.lastIndexOf('/') + 1), post.title);
 				} catch (error) {
 					status.setAttribute('role', 'alert');
@@ -250,15 +250,24 @@ export class PostModal extends Modal {
 
 	private async showPublicationControls(session: string, newsletter: Newsletter, draftId: string, title: string): Promise<void> {
 		const status = this.contentEl.createEl('p', { text: t('loadingCategories'), attr: { role: 'status', 'aria-live': 'polite' } });
+		let sectionId: number | null = null;
+		let categoriesLoaded = false;
+		let busy = false;
+		let publicationAttempted = false;
+		let category: DropdownComponent | undefined;
+		let publishButton: ButtonComponent | undefined;
+		let openButton: ButtonComponent;
+		const setBusy = (value: boolean): void => {
+			busy = value;
+			category?.setDisabled(value || publicationAttempted);
+			publishButton?.setDisabled(value || publicationAttempted);
+			openButton.setDisabled(value);
+		};
 		try {
 			const sections = await getSections(session, newsletter);
 			if (!this.modalEl.isConnected) return;
+			categoriesLoaded = true;
 			status.empty();
-			let sectionId: number | null = null;
-			let sendEmail = true;
-			let publishing = false;
-			let category: DropdownComponent | undefined;
-			let email: ToggleComponent;
 			if (sections.length) new Setting(this.contentEl).setName(t('category')).addDropdown(dropdown => {
 				category = dropdown;
 				dropdown.selectEl.setAttribute('aria-label', t('category'));
@@ -266,32 +275,46 @@ export class PostModal extends Modal {
 				for (const section of sections) dropdown.addOption(String(section.id), section.name);
 				dropdown.onChange(value => { sectionId = value ? Number(value) : null; });
 			});
-			new Setting(this.contentEl).setName(t('sendEmail')).setDesc(t('sendEmailHelp')).addToggle(toggle => {
-				email = toggle;
-				toggle.setValue(sendEmail).onChange(value => { sendEmail = value; });
+			new Setting(this.contentEl).addButton(button => {
+				publishButton = button;
+				button.setButtonText(t('publishDraft')).setCta().onClick(async () => {
+					if (busy || publicationAttempted) return;
+					publicationAttempted = true;
+					setBusy(true);
+					status.setAttribute('role', 'status');
+					status.setText(t('publishingDraft'));
+					try {
+						const url = await publishDraft(session, newsletter, draftId, sectionId);
+						if (!this.modalEl.isConnected) return;
+						this.contentEl.empty();
+						this.contentEl.createEl('p', { text: t('draftPublished', { title }), attr: { role: 'status' } });
+						this.contentEl.createEl('a', { text: t('openPublishedPost'), href: url, attr: { target: '_blank', rel: 'noopener' } });
+					} catch (error) {
+						status.setAttribute('role', 'alert');
+						status.setText(error instanceof SubstackError ? error.message : t('draftPublicationUncertain'));
+					} finally { setBusy(false); }
+				});
 			});
-			new Setting(this.contentEl).addButton(button => button.setButtonText(t('publishDraft')).setCta().onClick(async () => {
-				if (publishing) return;
-				publishing = true;
-				button.setDisabled(true);
-				category?.setDisabled(true);
-				email.setDisabled(true);
-				status.setAttribute('role', 'status');
-				status.setText(t('publishingDraft'));
-				try {
-					const url = await publishDraft(session, newsletter, draftId, sectionId, sendEmail);
-					if (!this.modalEl.isConnected) return;
-					this.contentEl.empty();
-					this.contentEl.createEl('p', { text: t('draftPublished', { title }), attr: { role: 'status' } });
-					this.contentEl.createEl('a', { text: t('openPublishedPost'), href: url, attr: { target: '_blank', rel: 'noopener' } });
-				} catch (error) {
-					status.setAttribute('role', 'alert');
-					status.setText(error instanceof SubstackError ? error.message : t('draftPublicationUncertain'));
-				}
-			}));
 		} catch (error) {
 			status.setAttribute('role', 'alert');
 			status.setText(error instanceof SubstackError ? error.message : t('categoriesFailed'));
 		}
+		if (!this.modalEl.isConnected) return;
+		new Setting(this.contentEl).addButton(button => {
+			openButton = button;
+			button.setButtonText(t('openDraft')).onClick(async () => {
+				if (busy) return;
+				setBusy(true);
+				try {
+					if (categoriesLoaded && !publicationAttempted) await saveDraftSection(session, newsletter, draftId, sectionId);
+					if (!this.modalEl.isConnected) return;
+					window.open(`https://${newsletter.subdomain}.substack.com/publish/post/${draftId}`, '_blank', 'noopener');
+					this.close();
+				} catch (error) {
+					status.setAttribute('role', 'alert');
+					status.setText(error instanceof SubstackError ? error.message : t('categorySaveFailed'));
+				} finally { setBusy(false); }
+			});
+		});
 	}
 }

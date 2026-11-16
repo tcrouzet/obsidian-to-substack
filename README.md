@@ -33,23 +33,23 @@ Use **Refresh** to reload your newsletters, **Switch account** to connect anothe
 3. Select the newsletter and click **Create draft**.
 4. Follow **Open draft in Substack** to review your post.
 
-Each export creates a new draft. Once its language editions are ready, choose a **Category** if the newsletter has sections, then click **Publish**. **Send to subscribers by email** is on by default: turn it off to publish on the website only. You can also use **Open draft in Substack** to review and publish there. If publication cannot be confirmed, the draft link stays available; the plugin never retries publication automatically.
+Each export creates a new draft. Once its language editions are ready, choose a **Category** if the newsletter has sections. Then choose **Publish (web + email)** to publish the article and email subscribers, or **Open draft in Substack**, at the bottom, to review it first. Opening the draft saves your category, opens Substack, and closes the plugin window. If publication cannot be confirmed, **Open draft in Substack** remains available; the plugin never retries publication automatically.
 
 Under **Settings → To Substack → Language editions**, choose your notes' **Default language**, then check the other languages to add to Substack drafts. The default initially follows Obsidian's language when supported, or English otherwise. English, Spanish, German, Italian, European Portuguese, and French are supported; the other languages are initially checked. Uncheck every additional language to disable automatic editions. Your choices apply to future drafts.
 
 If **Additional post languages** and **Allow automatic translation** are enabled in your Substack publication settings, To Substack prepares the selected editions. It skips the default language and the post's detected original language. Existing editions are preserved.
 
-The plugin waits for Substack to generate the editions, then checks that they were saved before reporting them as ready. If a language cannot be confirmed, the draft link remains available so you can review the editions in Substack.
+The plugin waits for Substack to generate the editions, then checks that they were saved before reporting them as ready. If a language cannot be confirmed, **Open draft in Substack** remains available so you can review the editions there.
 
 | In your note | In the Substack draft |
 | --- | --- |
-| The first level-one heading, `# Title` | Post title |
+| YAML `title`, or the first level-one heading, `# Title` | Post title |
 | The opening paragraph, if it is entirely italic; otherwise YAML `metadescription`, when present | Subtitle |
 | The remaining text | Formatted post body |
 | Embedded images | Images in the post body |
 | YAML properties | Excluded from the export |
 
-If the note has no level-one heading, its filename without `.md` becomes the title. The extracted title and opening italic paragraph are removed from the exported body. If there is no italic opening paragraph, the YAML `metadescription` property supplies the subtitle. Paragraphs, headings, bold, italics, web links, lists, blockquotes, inline code, code blocks, and horizontal rules keep their formatting.
+A non-empty YAML `title` takes priority over the first level-one heading. If neither is available, the filename without `.md` becomes the title. The first level-one heading and opening italic paragraph are removed from the exported article body. If there is no italic opening paragraph, the YAML `metadescription` property supplies the subtitle. Paragraphs, headings, bold, italics, web links, lists, blockquotes, inline code, code blocks, and horizontal rules keep their formatting.
 
 For example:
 
@@ -86,6 +86,8 @@ To publish an excerpt, select text in the editor and choose **To Substack** from
 
 The title and opening italic paragraph remain in the Note's text. Headings become bold paragraphs; lists, quotes, links, and code retain their formatting. Images appear as gallery attachments, with a maximum of 20 unique images. Notes use Substack's own layout rather than inline image positions. Language edition settings apply to newsletter drafts.
 
+If the YAML has a non-empty `title`, it appears in bold at the top of the Note, before any image or body text. A matching level-one heading is not repeated. Publishing selected text ignores the YAML title.
+
 If Substack does not confirm publication, check your Notes before trying again. The plugin never retries publication automatically.
 
 ## Remove trailing tags
@@ -94,7 +96,7 @@ Enable **Settings → To Substack → Export → Remove trailing tags** to omit 
 
 ## Account and privacy
 
-Creating a draft or publishing a Note sends the selected content and images to Substack. Publishing an article makes it public and, if the email option is enabled, sends it to subscribers. Linked images are downloaded from their hosts without your Substack session. Your session is kept in **Obsidian's secret storage**; the plugin settings contain only a reference to that secret.
+Creating a draft or publishing a Note sends the selected content and images to Substack. Publishing an article makes it public and emails subscribers. Opening a draft for review does not publish it. Linked images are downloaded from their hosts without your Substack session. Your session is kept in **Obsidian's secret storage**; the plugin settings contain only a reference to that secret.
 
 Disconnecting removes the connection and clears the session secret created by To Substack. Secrets you imported from elsewhere remain available in Obsidian's secret storage.
 
