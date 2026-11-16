@@ -56,7 +56,7 @@ module.exports = (async () => {
 			} };
 		}
 	});
-	const { normalizeSession, parseAccount, getAccount, createDraft, publishNote, activateDraftLanguages, setLocale } = moduleForCheck.exports;
+	const { normalizeSession, parseAccount, getAccount, createDraft, publishNote, activateDraftLanguages, getSections, publishDraft, setLocale } = moduleForCheck.exports;
 	setLocale('fr');
 	const profile = { name: 'Compte de test', publicationUsers: [
 		{ publication: { name: 'Première newsletter', subdomain: 'premiere' } },
@@ -157,6 +157,11 @@ module.exports = (async () => {
 	assert.equal(illustratedBody.content.length, 2);
 	for (const image of illustratedBody.content) assert.equal(image.attrs.src, 'https://images.example.invalid/pixel.png');
 	assert.equal(imageNode.attrs.src, dataUri, 'Preparing the upload must not change the source document');
+	const captionedImage = { type: 'captionedImage', content: [imageNode, { type: 'caption', content: [{ type: 'text', text: 'Visible caption' }] }] };
+	await createDraft('token', newsletter, { ...post, body: { type: 'doc', content: [captionedImage] } });
+	const captionedBody = JSON.parse(JSON.parse(requests.at(-1).body).draft_body);
+	assert.deepEqual(captionedBody.content[0], { ...captionedImage, content: [{ ...imageNode, attrs: { ...imageNode.attrs, src: 'https://images.example.invalid/pixel.png' } }, captionedImage.content[1]] });
+	assert.equal(captionedImage.content[0].attrs.src, dataUri, 'Uploading a captioned image must preserve the source');
 	const beforeInvalidImage = requests.length;
 	await assert.rejects(createDraft('token', newsletter, { ...post, body: { type: 'doc', content: [{ type: 'image2', attrs: { src: 'data:text/html;base64,AA==' } }] } }), /image.*invalide/);
 	assert.equal(requests.length, beforeInvalidImage, 'Only encoded images may be uploaded');
@@ -166,6 +171,48 @@ module.exports = (async () => {
 		await assert.rejects(createDraft('token', newsletter, illustratedPost), /image/);
 		assert.equal(requests.length, beforeFailedImage + 1, 'A failed image upload must not create a partial draft or retry automatically');
 	}
+
+	const sections = [{ id: 7, name: 'Essays', is_live: true }, { id: 8, name: 'Inactive', is_live: false }];
+	for (const response of [sections, { sections }, []]) {
+		respond = () => ({ status: 200, json: response });
+		assert.equal(JSON.stringify(await getSections('token', newsletter)), JSON.stringify(response === sections || response.sections ? [{ id: 7, name: 'Essays' }] : []));
+		assert.equal(requests.at(-1).url, 'https://choisie.substack.com/api/v1/publication/sections');
+	}
+	for (const invalid of [{}, [null], [{ id: '../7', name: 'Unsafe' }]]) {
+		respond = () => ({ status: 200, json: invalid });
+		await assert.rejects(getSections('token', newsletter), /catégories/);
+	}
+	for (const [sectionId, sendEmail] of [[7, false], [null, true]]) {
+		respond = request => ({ status: 200, json: request.method === 'PUT' ? { id: 123, draft_section_id: sectionId } : { id: 123, slug: 'published-article', is_published: true } });
+		const beforePublish = requests.length;
+		assert.equal(await publishDraft('token', newsletter, '123', sectionId, sendEmail), 'https://choisie.substack.com/p/published-article');
+		const publicationRequests = requests.slice(beforePublish);
+		assert.deepEqual(publicationRequests.map(request => request.method), ['PUT', 'POST', 'GET']);
+		assert.deepEqual(JSON.parse(publicationRequests[0].body), { draft_section_id: sectionId, section_chosen: true });
+		assert.equal(publicationRequests[1].url, 'https://choisie.substack.com/api/v1/drafts/123/publish');
+		assert.deepEqual(JSON.parse(publicationRequests[1].body), { send: sendEmail, share_automatically: false });
+		assert.equal(publicationRequests[2].url, 'https://choisie.substack.com/api/v1/drafts/123');
+	}
+	respond = () => ({ status: 200, json: { id: 123, draft_section_id: 99 } });
+	const beforeSectionFailure = requests.length;
+	await assert.rejects(publishDraft('token', newsletter, '123', 7, false), /catégorie/);
+	assert.equal(requests.length, beforeSectionFailure + 1, 'An unconfirmed category must prevent publication');
+	for (const failure of ['network', 'response', 'confirmation']) {
+		respond = request => {
+			if (request.method === 'PUT') return { status: 200, json: { id: 123, draft_section_id: null } };
+			if (request.method === 'POST' && failure === 'network') throw Error('private transport details');
+			if (request.method === 'POST' && failure === 'response') return { status: 200, get json() { throw Error('private response'); } };
+			return { status: 200, json: { id: 123, slug: 'not-published', is_published: false } };
+		};
+		const beforePublishFailure = requests.length;
+		await assert.rejects(publishDraft('token', newsletter, '123', null, false), /publication/);
+		assert.equal(requests.slice(beforePublishFailure).filter(request => request.method === 'POST').length, 1, 'Never retry an uncertain publication');
+	}
+	const beforeInvalidPublication = requests.length;
+	await assert.rejects(publishDraft('token', newsletter, '../123', null, false), /Newsletter invalide/);
+	await assert.rejects(publishDraft('token', newsletter, '123', -1, false), /Catégorie invalide\./);
+	assert.equal(requests.length, beforeInvalidPublication);
+	console.log('Draft publication: categories, explicit email choice, saved category confirmation, publication read-back and no retries pass.');
 
 	const noteBody = { type: 'doc', content: [
 		{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Title', marks: [{ type: 'strong' }] }] },

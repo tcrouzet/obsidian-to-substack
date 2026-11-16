@@ -33,7 +33,7 @@ Use **Refresh** to reload your newsletters, **Switch account** to connect anothe
 3. Select the newsletter and click **Create draft**.
 4. Follow **Open draft in Substack** to review your post.
 
-Each export creates a new draft. You control publication and email delivery in Substack.
+Each export creates a new draft. Once its language editions are ready, choose a **Category** if the newsletter has sections, then click **Publish**. **Send to subscribers by email** is on by default: turn it off to publish on the website only. You can also use **Open draft in Substack** to review and publish there. If publication cannot be confirmed, the draft link stays available; the plugin never retries publication automatically.
 
 Under **Settings → To Substack → Language editions**, choose your notes' **Default language**, then check the other languages to add to Substack drafts. The default initially follows Obsidian's language when supported, or English otherwise. English, Spanish, German, Italian, European Portuguese, and French are supported; the other languages are initially checked. Uncheck every additional language to disable automatic editions. Your choices apply to future drafts.
 
@@ -69,7 +69,7 @@ The draft is titled **A walk by the river**, with **Notes from an autumn morning
 
 Use Obsidian image embeds such as `![[photo.jpg]]`, Markdown images such as `![A view of the river](photo.jpg)`, or HTML `<img>` tags. Relative paths and filenames containing spaces are supported.
 
-Local images are uploaded to the selected newsletter before the draft is created. Their position and alternative text are preserved, and a repeated image is uploaded once per draft. Images already hosted online keep their web address. The files in your vault are left intact.
+Local and linked images are encoded in base64 and uploaded to the selected newsletter before the draft is created. Their position and alternative text are preserved, and a repeated image is uploaded once per draft. Image labels become visible captions; an HTML figure's explicit caption takes priority and keeps its formatting. The files in your vault are left intact.
 
 If an image cannot be found or uploaded, the plugin stops before creating the draft and shows an error. If a connection error leaves the result of draft creation uncertain, check your Substack drafts before trying again.
 
@@ -92,7 +92,7 @@ Enable **Settings → To Substack → Export → Remove trailing tags** to omit 
 
 ## Account and privacy
 
-Creating a draft or publishing a Note sends the selected content and images to Substack. Your session is kept in **Obsidian's secret storage**; the plugin settings contain only a reference to that secret.
+Creating a draft or publishing a Note sends the selected content and images to Substack. Publishing an article makes it public and, if the email option is enabled, sends it to subscribers. Linked images are downloaded from their hosts without your Substack session. Your session is kept in **Obsidian's secret storage**; the plugin settings contain only a reference to that secret.
 
 Disconnecting removes the connection and clears the session secret created by To Substack. Secrets you imported from elsewhere remain available in Obsidian's secret storage.
 

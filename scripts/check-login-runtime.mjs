@@ -31,7 +31,23 @@ globalThis.toSubstackPendingResponses = [];
 globalThis.toSubstackDrafts = [];
 globalThis.toSubstackImageUploads = [];
 globalThis.toSubstackLinkedImageDownloads = [];
+globalThis.toSubstackSections = [];
+globalThis.toSubstackPublishRequests = [];
+globalThis.toSubstackSectionUpdates = [];
 const fixtureApi = { ...host, requestUrl: async options => {
+ if (options.method === 'GET' && ['https://premiere-fixture.substack.com/api/v1/publication/sections', 'https://deuxieme-fixture.substack.com/api/v1/publication/sections'].includes(options.url)) return { status: 200, json: { sections: globalThis.toSubstackSections } };
+ if (options.method === 'PUT' && options.url === 'https://premiere-fixture.substack.com/api/v1/drafts/123') {
+  const update = JSON.parse(options.body);
+  globalThis.toSubstackSectionUpdates.push(update);
+  globalThis.toSubstackDraftSection = update.draft_section_id;
+  return { status: 200, json: { id: 123, draft_section_id: update.draft_section_id } };
+ }
+ if (options.method === 'POST' && options.url === 'https://premiere-fixture.substack.com/api/v1/drafts/123/publish') {
+  globalThis.toSubstackPublishRequests.push(JSON.parse(options.body));
+  await new Promise(resolve => { globalThis.toSubstackFinishPublish = resolve; });
+  return { status: globalThis.toSubstackPublishFailure ? 500 : 200, json: { id: 123 } };
+ }
+ if (options.method === 'GET' && options.url === 'https://premiere-fixture.substack.com/api/v1/drafts/123') return { status: 200, json: { id: 123, draft_section_id: globalThis.toSubstackDraftSection, is_published: true, slug: 'published-article' } };
  if (['https://images.example.invalid/linked?format=png', 'http://images.example.invalid/linked?format=png'].includes(options.url)) {
   globalThis.toSubstackLinkedImageDownloads.push({ url: options.url, headers: options.headers ?? {} });
   const mode = globalThis.toSubstackLinkedImageFailure;
@@ -145,6 +161,90 @@ async function observeLoginLifecycle() {
  })()`);
 }
 
+async function checkPublicationControls() {
+ await main.evaluate(`(async () => {
+  app.setting.close();
+  const remote = window.require('electron').remote;
+  const win = remote.BrowserWindow.getAllWindows().find(win => win.webContents.getURL() === 'app://obsidian.md/index.html');
+  remote.app.focus({ steal: true }); win.show(); win.focus();
+  globalThis.toSubstackPublicationFile = await app.vault.create('Publication controls.md', '# Publication\\n\\nAn article.');
+  const plugin = app.plugins.getPlugin('to-substack');
+  app.secretStorage.setSecret('obsidian-to-substack-session', 'substack.sid=fixture-desktop-session');
+  plugin.settings.sessionSecretId = 'obsidian-to-substack-session';
+  plugin.settings.translationLanguages = ['en', 'fr'];
+  plugin.settings.defaultLanguage = 'en';
+  plugin.account = { name: 'Fixture account', newsletters: [{ name: 'Fixture newsletter', subdomain: 'premiere-fixture' }] };
+ })()`);
+ for (const scenario of ['category', 'email', 'failure']) {
+  await main.evaluate(`(() => {
+   globalThis.toSubstackPublishRequests = [];
+   globalThis.toSubstackSectionUpdates = [];
+   globalThis.toSubstackSections = ${scenario === 'email' ? '[]' : '[{id:7,name:"Essays",is_live:true}]'};
+   globalThis.toSubstackPublishFailure = ${scenario === 'failure'};
+   globalThis.toSubstackFinishDraft = null;
+   globalThis.toSubstackFinishLanguages = null;
+   globalThis.toSubstackFinishPublish = null;
+   globalThis.toSubstackPublicationModal = new globalThis.toSubstackUiCheck.PostModal(app.plugins.getPlugin('to-substack'), globalThis.toSubstackPublicationFile);
+   globalThis.toSubstackPublicationModal.open();
+   globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta').click();
+  })()`);
+  await poll(() => main.evaluate(`!!globalThis.toSubstackFinishDraft`), 'Publication draft created');
+  await main.evaluate(`globalThis.toSubstackFinishDraft()`);
+  await poll(() => main.evaluate(`!!globalThis.toSubstackFinishLanguages`), 'Publication waits for languages');
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button')`), false, 'No publish button while languages are pending');
+  await main.evaluate(`globalThis.toSubstackFinishLanguages({status:200,json:{additional_post_languages_enabled:false}})`);
+  await poll(() => main.evaluate(`[...globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('.modal button')].some(button => button.textContent === globalThis.toSubstackUiCheck.t('publishDraft'))`), 'Publish controls ready');
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal select')`), scenario !== 'email', 'Only show categories when they exist');
+  assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.checkbox-container').classList.contains('is-enabled')`), true, 'Email must default to on');
+  await main.evaluate(`(() => {
+   const select = globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal select');
+   if(select) {select.value='7';select.dispatchEvent(new Event('change',{bubbles:true}));}
+   ${scenario !== 'email' ? "globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal .checkbox-container').click();" : ''}
+   const button=globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta');button.click();button.click();
+  })()`);
+  await poll(() => main.evaluate(`!!globalThis.toSubstackFinishPublish`), 'Publish request sent');
+  assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), [{draft_section_id:scenario === 'email' ? null : 7,section_chosen:true}]);
+  assert.deepEqual(await main.evaluate(`globalThis.toSubstackPublishRequests`), [{send:scenario === 'email',share_automatically:false}]);
+  assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta').disabled`), true, 'Prevent duplicate publication');
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/p/published-article"]')`), false, 'Wait for publication confirmation');
+  await main.evaluate(`globalThis.toSubstackFinishPublish()`);
+  if (scenario === 'failure') {
+   await poll(() => main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal [role="alert"]')?.textContent === globalThis.toSubstackUiCheck.t('draftPublicationUncertain')`), 'Uncertain publication error');
+   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/publish/post/123"]')`), true, 'Retain the draft link after an error');
+   await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta').click()`);
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`), 1, 'An uncertain publication must not be retried');
+  } else await poll(() => main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/p/published-article"]')`), 'Published article link');
+  await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
+ }
+ console.log('Publication UI: categories, email enabled by default, language ordering, confirmation, duplicate clicks and failure recovery pass.');
+}
+
+async function checkImageCaptions() {
+ const result = await main.evaluate(`(async () => {
+  const source = '# Captions\\n\\n![Markdown caption](assets/pixel%20test.png)\\n\\n![[assets/pixel test.png|Wiki caption]]\\n\\n<figure><img src="assets/pixel%20test.png" alt="Accessible description"><figcaption>A <em>formatted</em> caption</figcaption></figure>\\n\\n![](assets/pixel%20test.png)';
+  const file = await app.vault.create('Image captions.md', source);
+  return { post: await globalThis.toSubstackPreparePost(app, file),
+   note: await globalThis.toSubstackPreparePost(app, file, { forNote: true, selection: '![Note image](assets/pixel%20test.png)' }),
+   source, original: await app.vault.read(file) };
+ })()`);
+ const nodes = result.post.body.content;
+ assert.equal(nodes.length, 4, 'Figure captions must not be duplicated as body text');
+ for (const [index, caption] of ['Markdown caption', 'Wiki caption', 'A formatted caption'].entries()) {
+  assert.equal(nodes[index].type, 'captionedImage');
+  assert.equal(nodes[index].content.length, 2);
+  assert.equal(nodes[index].content[0].type, 'image2');
+  assert.equal(nodes[index].content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+  assert.equal(nodes[index].content[1].type, 'caption');
+  assert.equal(nodes[index].content[1].content.map(node => node.text || '').join(''), caption);
+ }
+ assert.equal(nodes[2].content[0].attrs.alt, 'Accessible description');
+ assert.ok(nodes[2].content[1].content.some(node => node.text === 'formatted' && node.marks.some(mark => mark.type === 'em')));
+ assert.equal(nodes[3].type, 'image2', 'An empty alt must not invent a caption');
+ assert.equal(result.note.body.content[0].type, 'image2', 'Notes must keep their gallery-compatible format');
+ assert.equal(result.original, result.source);
+ console.log('Image captions: native caption blocks, Markdown, wiki embeds, formatted figures, alt text and Notes pass.');
+}
+
 async function checkLinkedImages() {
  const result = await main.evaluate(`(async () => {
   const prepare = globalThis.toSubstackPreparePost;
@@ -155,7 +255,7 @@ async function checkLinkedImages() {
   const post = await prepare(app, file);
   const note = await prepare(app, file, { forNote: true, selection: '![Selected image](' + https + ')' });
   const image = new Image();
-  image.src = post.body.content[0].attrs.src;
+  image.src = post.body.content[0].content[0].attrs.src;
   await image.decode();
   const failures = [];
   for (const mode of ['http', 'mime', 'empty', 'network']) {
@@ -168,9 +268,13 @@ async function checkLinkedImages() {
    downloads: globalThis.toSubstackLinkedImageDownloads, source, original: await app.vault.read(file) };
  })()`);
  assert.equal(result.post.body.content.length, 3);
- for (const image of result.post.body.content) assert.equal(image.attrs.src, `data:image/png;base64,${pixelBase64}`);
- assert.equal(result.post.body.content[0].attrs.alt, 'Linked image');
- assert.equal(result.post.body.content[1].attrs.alt, 'HTML image');
+ for (const [index, caption] of ['Linked image', 'HTML image', 'HTTP image'].entries()) {
+  const block = result.post.body.content[index];
+  assert.equal(block.type, 'captionedImage');
+  assert.equal(block.content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+  assert.equal(block.content[0].attrs.alt, caption);
+  assert.deepEqual(block.content[1], { type: 'caption', content: [{ type: 'text', text: caption }] });
+ }
  assert.equal(result.note.body.content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
  assert.deepEqual([result.width, result.height], [1, 1]);
  assert.deepEqual(result.downloads.slice(0, 3).map(request => request.url), [
@@ -620,8 +724,14 @@ try {
  assert.equal(imageUploads[0].url, 'https://deuxieme-fixture.substack.com/api/v1/image');
  assert.equal(imageUploads[0].contentType, 'application/x-www-form-urlencoded');
  assert.equal(imageUploads[0].image, `data:image/png;base64,${pixelBase64}`);
- const images = postBody.content.filter(node => node.type === 'image2');
- assert.equal(images.length, 2);
+ const captionedImages = postBody.content.filter(node => node.type === 'captionedImage');
+ assert.equal(captionedImages.length, 2);
+ assert.deepEqual(captionedImages.map(node => node.content[1]), [
+  { type: 'caption', content: [{ type: 'text', text: 'Petit pixel' }] },
+  { type: 'caption', content: [{ type: 'text', text: 'Image Markdown' }] }
+ ]);
+ const images = captionedImages.map(node => node.content[0]);
+ for (const image of images) assert.equal(image.type, 'image2');
  for (const image of images) assert.equal(image.attrs.src, 'https://images.example.invalid/pixel.png');
  assert.equal(images[0].attrs.alt, 'Petit pixel');
  assert.equal(images[1].attrs.alt, 'Image Markdown');
@@ -665,18 +775,21 @@ try {
   const file = await app.vault.create('notes/Image relative.md', '# Image relative\\n\\n![Image relative](../assets/pixel%20test.png)');
   return globalThis.toSubstackPreparePost(app, file);
  })()`);
- assert.equal(relativeImage.body.content[0].type, 'image2');
- assert.equal(relativeImage.body.content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+ assert.equal(relativeImage.body.content[0].type, 'captionedImage');
+ assert.equal(relativeImage.body.content[0].content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+ assert.deepEqual(relativeImage.body.content[0].content[1], { type: 'caption', content: [{ type: 'text', text: 'Image relative' }] });
  const htmlImage = await main.evaluate(`(async () => {
   const file = await app.vault.create('Image HTML.md', '<img src="assets/pixel%20test.png" alt="Image HTML">');
   const post = await globalThis.toSubstackPreparePost(app, file);
   const image = new Image();
-  image.src = post.body.content[0].attrs.src;
+  image.src = post.body.content[0].content[0].attrs.src;
   await image.decode();
   return { post, width: image.naturalWidth, height: image.naturalHeight };
  })()`);
- assert.equal(htmlImage.post.body.content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
- assert.equal(htmlImage.post.body.content[0].attrs.alt, 'Image HTML');
+ assert.equal(htmlImage.post.body.content[0].type, 'captionedImage');
+ assert.equal(htmlImage.post.body.content[0].content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+ assert.equal(htmlImage.post.body.content[0].content[0].attrs.alt, 'Image HTML');
+ assert.deepEqual(htmlImage.post.body.content[0].content[1], { type: 'caption', content: [{ type: 'text', text: 'Image HTML' }] });
  assert.equal(htmlImage.width, 1);
  assert.equal(htmlImage.height, 1);
  const missingImage = await main.evaluate(`(async () => {
@@ -731,8 +844,10 @@ try {
  await poll(() => main.evaluate(`Array.from(document.querySelectorAll('.modal [role="alert"]')).some(node => node.textContent === 'Could not upload an image to Substack. The draft was not created.')`), 'English image upload error');
  assert.equal(await main.evaluate(`globalThis.toSubstackDrafts.length`), 1, 'The English dialog must also stop before creating a partial draft');
  await main.evaluate(`globalThis.toSubstackEnglishModal.close()`);
+ await checkImageCaptions();
  await checkLinkedImages();
  await checkSessionReuse();
+ await checkPublicationControls();
  console.log(JSON.stringify({ status: 'PASS', localImageEncoding: true, imageUpload: true, relativeImages: true, htmlImages: true, noteDraft: true, internalSubstackNavigation: true, foreignNavigationBlocked: true, nativeSettings: true, nativeSecretControl: true, desktopSessionCapture: true, returnToMinimizedLogin: true, newsletterList: true, visibleErrorAndRetry: true, disconnect: true, beforeUnloadDismissed: true, spaLogin: true, automaticReturnWithoutBrowserEvent: true, hiddenSettingsRestored: true, pendingRequestCancellation: true, retryAfterCancellation: true, nativeWindowClose: true, otherTabsClickable: true, settingsClosable: true, loginSandbox: sandbox, authenticatedSubstackRequests: false }));
 } catch (error) {
  console.error(error);

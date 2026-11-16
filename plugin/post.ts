@@ -1,7 +1,7 @@
 import { draftLanguageName, t } from './i18n';
-import { App, arrayBufferToBase64, ButtonComponent, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, requestUrl, Setting, TFile } from 'obsidian';
+import { App, arrayBufferToBase64, ButtonComponent, Component, DropdownComponent, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, requestUrl, Setting, TFile, ToggleComponent } from 'obsidian';
 import type ToSubstackPlugin from './main';
-import { activateDraftLanguages, createDraft, publishNote, PostContent, PostNode, SubstackError } from './substack';
+import { activateDraftLanguages, createDraft, getSections, Newsletter, publishDraft, publishNote, PostContent, PostNode, SubstackError } from './substack';
 
 const NOTE_DESTINATION = ':note';
 
@@ -61,25 +61,33 @@ async function encodeImages(app: App, file: TFile, container: HTMLElement): Prom
 	for (const image of Array.from(container.querySelectorAll('img'))) image.src = await encode(image.getAttribute('src') || '');
 }
 
-function inline(node: Node, marks: NonNullable<PostNode['marks']> = []): PostNode[] {
+function inline(node: Node, marks: NonNullable<PostNode['marks']> = [], includeCaptions = false): PostNode[] {
 	if (node.nodeType === Node.TEXT_NODE) return node.textContent ? [{ type: 'text', text: node.textContent, ...(marks.length ? { marks } : {}) }] : [];
 	if (!node.instanceOf(HTMLElement)) return [];
 	if (node.tagName === 'BR') return [{ type: 'hardBreak' }];
+	if (includeCaptions && node.tagName === 'FIGCAPTION') return [];
 	if (node.tagName === 'IMG') {
 		const src = node.getAttribute('src') || '';
 		if (!/^(https?:\/\/|data:image\/)/i.test(src)) throw new SubstackError(t('imageEmbedFailed'));
-		return [{ type: 'image2', attrs: { src, alt: node.getAttribute('alt') || '', fullscreen: false } }];
+		const alt = node.getAttribute('alt') || '';
+		const image: PostNode = { type: 'image2', attrs: { src, alt, fullscreen: false } };
+		if (includeCaptions) {
+			const figureCaption = node.closest('figure')?.querySelector('figcaption');
+			const caption = figureCaption ? inline(figureCaption) : [{ type: 'text', text: alt }];
+			if (caption.some(child => child.text?.trim())) return [{ type: 'captionedImage', content: [image, { type: 'caption', content: caption }] }];
+		}
+		return [image];
 	}
 	const mark = ({ STRONG: 'strong', B: 'strong', EM: 'em', I: 'em', CODE: 'code' } as Record<string, string>)[node.tagName];
 	if (mark) marks = [...marks, { type: mark }];
 	const href = node.getAttribute('href');
 	if (node.tagName === 'A' && href && /^(https?:\/\/|mailto:|#)/i.test(href)) marks = [...marks, { type: 'link', attrs: { href } }];
 	const result: PostNode[] = [];
-	for (const child of Array.from(node.childNodes)) result.push(...inline(child, marks));
+	for (const child of Array.from(node.childNodes)) result.push(...inline(child, marks, includeCaptions));
 	return result;
 }
 
-function blocks(parent: Element): PostNode[] {
+function blocks(parent: Element, includeCaptions = false): PostNode[] {
 	const result: PostNode[] = [];
 	let pending: PostNode[] = [];
 	const flush = (): void => {
@@ -87,27 +95,27 @@ function blocks(parent: Element): PostNode[] {
 		pending = [];
 	};
 	for (const child of Array.from(parent.childNodes)) {
-		if (!child.instanceOf(HTMLElement)) { pending.push(...inline(child)); continue; }
+		if (!child.instanceOf(HTMLElement)) { pending.push(...inline(child, [], includeCaptions)); continue; }
 		const tag = child.tagName;
-		if (tag === 'IMG') { flush(); result.push(...inline(child)); }
+		if (tag === 'IMG') { flush(); result.push(...inline(child, [], includeCaptions)); }
 		else if (tag === 'P') {
 			flush();
-			for (const item of inline(child)) {
-				if (item.type === 'image2') { flush(); result.push(item); }
+			for (const item of inline(child, [], includeCaptions)) {
+				if (item.type === 'image2' || item.type === 'captionedImage') { flush(); result.push(item); }
 				else pending.push(item);
 			}
 			flush();
-		} else if (/^H[1-6]$/.test(tag)) { flush(); result.push({ type: 'heading', attrs: { level: Number(tag[1]) }, content: inline(child) }); }
+		} else if (/^H[1-6]$/.test(tag)) { flush(); result.push({ type: 'heading', attrs: { level: Number(tag[1]) }, content: inline(child, [], includeCaptions) }); }
 		else if (tag === 'HR') { flush(); result.push({ type: 'horizontal_rule' }); }
 		else if (tag === 'PRE') { flush(); result.push({ type: 'codeBlock', content: child.textContent ? [{ type: 'text', text: child.textContent }] : [] }); }
-		else if (['UL', 'OL', 'LI', 'BLOCKQUOTE', 'DIV'].includes(tag)) {
+		else if (['UL', 'OL', 'LI', 'BLOCKQUOTE', 'DIV', 'FIGURE'].includes(tag)) {
 			flush();
-			const content = blocks(child);
-			if (tag === 'DIV') result.push(...content);
+			const content = blocks(child, includeCaptions);
+			if (tag === 'DIV' || tag === 'FIGURE') result.push(...content);
 			else result.push({ type: ({ UL: 'bulletList', OL: 'orderedList', LI: 'listItem', BLOCKQUOTE: 'blockquote' } as Record<string, string>)[tag], content });
 		} else if (tag === 'TABLE') {
 			throw new SubstackError(t('tablesUnsupported'));
-		} else pending.push(...inline(child));
+		} else pending.push(...inline(child, [], includeCaptions));
 	}
 	flush();
 	return result;
@@ -126,7 +134,7 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 		const heading = options.forNote ? null : container.querySelector('h1');
 		const title = heading?.textContent?.trim() || file.basename;
 		heading?.remove();
-		const body = blocks(container);
+		const body = blocks(container, !options.forNote);
 		if (options.removeTrailingTags) {
 			const isTag = (node: PostNode): boolean => node.type === 'hardBreak' || node.type === 'text' && (!node.text?.trim()
 				|| (/^#[^\s#]+$/.test(node.text) && node.marks?.some(mark => mark.type === 'link' && mark.attrs?.href?.startsWith('#')) === true));
@@ -224,6 +232,7 @@ export class PostModal extends Modal {
 						this.contentEl.createEl('p', { text: t('draftCreated', { title: post.title, newsletter: newsletter.name }) }),
 						this.contentEl.createEl('a', { text: t('openDraft'), href: url, attr: { target: '_blank', rel: 'noopener' } })
 					);
+					await this.showPublicationControls(session, newsletter, url.slice(url.lastIndexOf('/') + 1), post.title);
 				} catch (error) {
 					status.setAttribute('role', 'alert');
 					status.setText(error instanceof SubstackError ? error.message : t(isNote ? 'notePublicationUncertain' : 'draftFailed'));
@@ -231,5 +240,52 @@ export class PostModal extends Modal {
 				}
 			});
 		});
+	}
+
+	private async showPublicationControls(session: string, newsletter: Newsletter, draftId: string, title: string): Promise<void> {
+		const status = this.contentEl.createEl('p', { text: t('loadingCategories'), attr: { role: 'status', 'aria-live': 'polite' } });
+		try {
+			const sections = await getSections(session, newsletter);
+			if (!this.modalEl.isConnected) return;
+			status.empty();
+			let sectionId: number | null = null;
+			let sendEmail = true;
+			let publishing = false;
+			let category: DropdownComponent | undefined;
+			let email: ToggleComponent;
+			if (sections.length) new Setting(this.contentEl).setName(t('category')).addDropdown(dropdown => {
+				category = dropdown;
+				dropdown.selectEl.setAttribute('aria-label', t('category'));
+				dropdown.addOption('', t('mainPublication'));
+				for (const section of sections) dropdown.addOption(String(section.id), section.name);
+				dropdown.onChange(value => { sectionId = value ? Number(value) : null; });
+			});
+			new Setting(this.contentEl).setName(t('sendEmail')).setDesc(t('sendEmailHelp')).addToggle(toggle => {
+				email = toggle;
+				toggle.setValue(sendEmail).onChange(value => { sendEmail = value; });
+			});
+			new Setting(this.contentEl).addButton(button => button.setButtonText(t('publishDraft')).setCta().onClick(async () => {
+				if (publishing) return;
+				publishing = true;
+				button.setDisabled(true);
+				category?.setDisabled(true);
+				email.setDisabled(true);
+				status.setAttribute('role', 'status');
+				status.setText(t('publishingDraft'));
+				try {
+					const url = await publishDraft(session, newsletter, draftId, sectionId, sendEmail);
+					if (!this.modalEl.isConnected) return;
+					this.contentEl.empty();
+					this.contentEl.createEl('p', { text: t('draftPublished', { title }), attr: { role: 'status' } });
+					this.contentEl.createEl('a', { text: t('openPublishedPost'), href: url, attr: { target: '_blank', rel: 'noopener' } });
+				} catch (error) {
+					status.setAttribute('role', 'alert');
+					status.setText(error instanceof SubstackError ? error.message : t('draftPublicationUncertain'));
+				}
+			}));
+		} catch (error) {
+			status.setAttribute('role', 'alert');
+			status.setText(error instanceof SubstackError ? error.message : t('categoriesFailed'));
+		}
 	}
 }

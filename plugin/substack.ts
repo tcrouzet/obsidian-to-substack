@@ -20,6 +20,11 @@ export interface Newsletter {
 	subdomain: string;
 }
 
+export interface NewsletterSection {
+	id: number;
+	name: string;
+}
+
 export interface SubstackAccount {
 	name: string;
 	newsletters: Newsletter[];
@@ -75,6 +80,8 @@ export function parseAccount(value: unknown): SubstackAccount {
 async function request(session: string, options: RequestUrlParam, timeoutMs = 15000): Promise<unknown> {
 	const cookie = normalizeSession(session);
 	const publishingNote = options.url === 'https://substack.com/api/v1/comment/feed';
+	const publishingDraft = options.method === 'POST' && options.url.endsWith('/publish');
+	const uncertainMessage = t(publishingNote ? 'notePublicationUncertain' : publishingDraft ? 'draftPublicationUncertain' : 'draftCreationUncertain');
 	let response;
 	let timeout: number | undefined;
 	try {
@@ -83,23 +90,24 @@ async function request(session: string, options: RequestUrlParam, timeoutMs = 15
 			headers: { 'Content-Type': 'application/json', ...options.headers, Cookie: cookie },
 			throw: false
 		}), new Promise<never>((_resolve, reject) => {
-			timeout = window.setTimeout(() => reject(new SubstackError(options.method === 'POST' ? t(publishingNote ? 'notePublicationUncertain' : 'draftCreationUncertain') : t('substackTimeout'))), timeoutMs);
+			timeout = window.setTimeout(() => reject(new SubstackError(options.method === 'POST' ? uncertainMessage : t('substackTimeout'))), timeoutMs);
 		})]);
 	} catch (error) {
 		if (error instanceof SubstackError) throw error;
-		if (options.method === 'POST') throw new SubstackError(t(publishingNote ? 'notePublicationUncertain' : 'draftCreationUncertain'));
+		if (options.method === 'POST') throw new SubstackError(uncertainMessage);
 		throw new SubstackError(t('substackConnectionFailed'));
 	} finally {
 		if (timeout !== undefined) window.clearTimeout(timeout);
 	}
 	if (response.status === 401 || response.status === 403) {
-		if (options.method === 'POST' && response.status === 403) throw new SubstackError(t(publishingNote ? 'notePermissionDenied' : 'draftPermissionDenied'), response.status);
+		if (options.method === 'POST' && response.status === 403) throw new SubstackError(t(publishingNote ? 'notePermissionDenied' : publishingDraft ? 'draftPublicationDenied' : 'draftPermissionDenied'), response.status);
 		throw new SubstackError(t('sessionExpired'), response.status);
 	}
 	if (response.status === 429) {
 		throw new SubstackError(t('tooManyRequests'));
 	}
 	if (response.status < 200 || response.status >= 300) {
+		if (publishingDraft) throw new SubstackError(t(response.status >= 400 && response.status < 500 ? 'draftPublicationFailed' : 'draftPublicationUncertain'), response.status);
 		if (options.method === 'POST') throw new SubstackError(t(publishingNote ? 'notePublicationUncertain' : 'draftCreationUnconfirmed'));
 		throw new SubstackError(t('substackUnavailable'));
 	}
@@ -107,6 +115,7 @@ async function request(session: string, options: RequestUrlParam, timeoutMs = 15
 		const result: unknown = response.json;
 		return result;
 	} catch {
+		if (publishingDraft) throw new SubstackError(t('draftPublicationUncertain'));
 		if (options.method === 'POST') throw new SubstackError(t(publishingNote ? 'notePublicationUncertain' : 'draftResponseUnreadable'));
 		throw new SubstackError(t('responseUnreadable'));
 	}
@@ -114,6 +123,33 @@ async function request(session: string, options: RequestUrlParam, timeoutMs = 15
 
 export async function getAccount(session: string): Promise<SubstackAccount> {
 	return parseAccount(await request(session, { url: 'https://substack.com/api/v1/user/profile/self', method: 'GET' }));
+}
+
+export async function getSections(session: string, newsletter: Newsletter): Promise<NewsletterSection[]> {
+	if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(newsletter.subdomain)) throw new SubstackError(t('invalidNewsletter'));
+	const result = await request(session, { url: `https://${newsletter.subdomain}.substack.com/api/v1/publication/sections`, method: 'GET' });
+	const sections: unknown = Array.isArray(result) ? result : isRecord(result) ? result.sections : undefined;
+	if (!Array.isArray(sections)) throw new SubstackError(t('categoriesFailed'));
+	const available: NewsletterSection[] = [];
+	for (const section of sections) {
+		if (!isRecord(section) || typeof section.id !== 'number' || !Number.isSafeInteger(section.id) || section.id <= 0 || typeof section.name !== 'string' || !section.name.trim()) throw new SubstackError(t('categoriesFailed'));
+		if (section.is_live !== false) available.push({ id: section.id, name: section.name });
+	}
+	return available;
+}
+
+export async function publishDraft(session: string, newsletter: Newsletter, draftId: string, sectionId: number | null, sendEmail: boolean): Promise<string> {
+	if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(newsletter.subdomain) || !/^[a-zA-Z0-9_-]+$/.test(draftId)) throw new SubstackError(t('invalidNewsletter'));
+	if (sectionId !== null && (!Number.isSafeInteger(sectionId) || sectionId <= 0)) throw new SubstackError(t('invalidCategory'));
+	const url = `https://${newsletter.subdomain}.substack.com/api/v1/drafts/${draftId}`;
+	const saved = await request(session, { url, method: 'PUT', body: JSON.stringify({ draft_section_id: sectionId, section_chosen: true }) });
+	if (!isRecord(saved) || String(saved.id) !== draftId || saved.draft_section_id !== sectionId) throw new SubstackError(t('categorySaveFailed'));
+	await request(session, { url: `${url}/publish`, method: 'POST', body: JSON.stringify({ send: sendEmail, share_automatically: false }) });
+	try {
+		const published = await request(session, { url, method: 'GET' });
+		if (!isRecord(published) || String(published.id) !== draftId || published.is_published !== true || typeof published.slug !== 'string' || !published.slug.trim()) throw new Error();
+		return `https://${newsletter.subdomain}.substack.com/p/${encodeURIComponent(published.slug)}`;
+	} catch { throw new SubstackError(t('draftPublicationUncertain')); }
 }
 
 export async function publishNote(session: string, body: PostNode): Promise<string> {
