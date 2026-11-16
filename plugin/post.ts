@@ -134,7 +134,8 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 		const properties = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata as Record<string, unknown> : {};
 		await MarkdownRenderer.render(app, markdown.slice(frontmatter?.contentStart ?? 0), container, file.path, component);
 		const imageSource = typeof properties.image === 'string' ? properties.image.trim() : '';
-		let cover = imageSource ? container.createEl('img', { attr: { src: imageSource } }) : null;
+		const imageCaption = typeof properties.caption === 'string' ? properties.caption.trim() : '';
+		let cover = imageSource ? container.createEl('img', { attr: { src: imageSource, alt: imageCaption } }) : null;
 		await encodeImages(app, file, container);
 		if (cover) {
 			const duplicate = Array.from(container.querySelectorAll('img')).some(image => image !== cover && image.src === cover?.src);
@@ -166,7 +167,11 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 		if (!options.forNote && !subtitle && typeof properties.metadescription === 'string') {
 			subtitle = properties.metadescription.replace(/\s+/g, ' ').trim();
 		}
-		if (cover) body.unshift(...inline(cover, [], !options.forNote));
+		if (cover) {
+			const imageNodes = inline(cover, [], !options.forNote);
+			if (options.forNote && imageCaption) imageNodes.push({ type: 'paragraph', content: [{ type: 'text', text: imageCaption, marks: [{ type: 'em' }] }] });
+			body.unshift(...imageNodes);
+		}
 		if (options.forNote && yamlTitle) body.unshift({ type: 'paragraph', content: [{ type: 'text', text: yamlTitle, marks: [{ type: 'strong' }] }] });
 		return { title, subtitle, body: { type: 'doc', content: body.length ? body : [{ type: 'paragraph' }] } };
 	} finally { component.unload(); }

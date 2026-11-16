@@ -250,6 +250,41 @@ async function checkPublicationControls() {
  console.log('Publication UI: category saved, open draft last and close, web and email publishing, duplicate clicks and failure recovery pass.');
 }
 
+async function checkFrontmatterCaption() {
+ const result = await main.evaluate(`(${(async function () {
+  const prepare = globalThis.toSubstackPreparePost;
+  const caption = 'A view & <literal text>';
+  const source = '---\ntitle: YAML title\nimage: assets/pixel%20test.png\ncaption: ' + JSON.stringify('  ' + caption + '  ') + '\n---\n# YAML title\n\n*Subtitle.*\n\nBody text.';
+  const file = await app.vault.create('Frontmatter caption.md', source);
+  const article = await prepare(app, file);
+  const note = await prepare(app, file, { forNote: true });
+  const duplicateFile = await app.vault.create('Frontmatter caption duplicate.md', source + '\n\n![Existing caption](assets/pixel%20test.png)');
+  const duplicate = await prepare(app, duplicateFile);
+  const duplicateNote = await prepare(app, duplicateFile, { forNote: true });
+  const noImageFile = await app.vault.create('Frontmatter caption without image.md', source.replace('image: assets/pixel%20test.png\n', ''));
+  const noImage = await prepare(app, noImageFile);
+  const emptyCaptionFile = await app.vault.create('Frontmatter empty caption.md', source.replace(JSON.stringify('  ' + caption + '  '), '"   "'));
+  const emptyCaption = await prepare(app, emptyCaptionFile);
+  const selection = await prepare(app, file, { forNote: true, selection: 'Only the selected text.' });
+  return { caption, article, note, duplicate, duplicateNote, noImage, emptyCaption, selection, source, original: await app.vault.read(file) };
+ }).toString()})()`);
+ const image = result.article.body.content[0];
+ assert.equal(image.type, 'captionedImage');
+ assert.equal(image.content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+ assert.equal(image.content[0].attrs.alt, result.caption);
+ assert.deepEqual(image.content[1], { type: 'caption', content: [{ type: 'text', text: result.caption }] });
+ assert.equal(result.article.subtitle, 'Subtitle.');
+ assert.equal(result.note.body.content[0].content[0].text, 'YAML title');
+ assert.equal(result.note.body.content[1].type, 'image2');
+ assert.deepEqual(result.note.body.content[2], { type: 'paragraph', content: [{ type: 'text', text: result.caption, marks: [{ type: 'em' }] }] });
+ for (const post of [result.duplicate, result.duplicateNote, result.noImage, result.selection]) assert.equal(JSON.stringify(post.body).includes(result.caption), false, 'Only caption the added YAML image');
+ assert.equal(result.duplicate.body.content.at(-1).content[1].content[0].text, 'Existing caption');
+ assert.equal(result.emptyCaption.body.content[0].type, 'image2');
+ assert.equal(result.selection.body.content[0].content[0].text, 'Only the selected text.');
+ assert.equal(result.original, result.source);
+ console.log('YAML captions: article caption, italic Note text, literal characters, existing captions, empty values and selected text pass.');
+}
+
 async function checkFrontmatterTitle() {
  const result = await main.evaluate(`(${(async function () {
   const prepare = globalThis.toSubstackPreparePost;
@@ -959,6 +994,7 @@ try {
  await checkLinkedImages();
  await checkFrontmatterImage();
  await checkFrontmatterTitle();
+ await checkFrontmatterCaption();
  await checkSessionReuse();
  await checkPublicationControls();
  console.log(JSON.stringify({ status: 'PASS', localImageEncoding: true, imageUpload: true, relativeImages: true, htmlImages: true, noteDraft: true, internalSubstackNavigation: true, foreignNavigationBlocked: true, nativeSettings: true, nativeSecretControl: true, desktopSessionCapture: true, returnToMinimizedLogin: true, newsletterList: true, visibleErrorAndRetry: true, disconnect: true, beforeUnloadDismissed: true, spaLogin: true, automaticReturnWithoutBrowserEvent: true, hiddenSettingsRestored: true, pendingRequestCancellation: true, retryAfterCancellation: true, nativeWindowClose: true, otherTabsClickable: true, settingsClosable: true, loginSandbox: sandbox, authenticatedSubstackRequests: false }));

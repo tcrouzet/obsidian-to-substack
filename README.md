@@ -71,6 +71,8 @@ Use Obsidian image embeds such as `![[photo.jpg]]`, Markdown images such as `![A
 
 A YAML `image` property containing a vault path or an image URL supplies the first image: at the start of an article's body, below its title and subtitle, or first in a Note's gallery. If the same image is already embedded in the text, it stays in its original position and is not added again. Publishing selected text ignores the note's YAML image.
 
+Use YAML `caption` for this image's caption. It appears as an image caption in articles and as italic text in Notes. If the image is already embedded in the body, its existing caption is preserved.
+
 Local and linked images are encoded in base64 and uploaded to the selected newsletter before the draft is created. Their position and alternative text are preserved, and a repeated image is uploaded once per draft. Image labels become visible captions; an HTML figure's explicit caption takes priority and keeps its formatting. The files in your vault are left intact.
 
 If an image cannot be found or uploaded, the plugin stops before creating the draft and shows an error. If a connection error leaves the result of draft creation uncertain, check your Substack drafts before trying again.
