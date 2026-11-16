@@ -1,5 +1,5 @@
 import { draftLanguageName, t } from './i18n';
-import { App, arrayBufferToBase64, ButtonComponent, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, Setting, TFile } from 'obsidian';
+import { App, arrayBufferToBase64, ButtonComponent, Component, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, requestUrl, Setting, TFile } from 'obsidian';
 import type ToSubstackPlugin from './main';
 import { activateDraftLanguages, createDraft, publishNote, PostContent, PostNode, SubstackError } from './substack';
 
@@ -8,7 +8,22 @@ const NOTE_DESTINATION = ':note';
 async function encodeImages(app: App, file: TFile, container: HTMLElement): Promise<void> {
 	const encoded = new Map<string, string>();
 	const encode = async (link: string): Promise<string> => {
-		if (/^(https?:\/\/|data:image\/)/i.test(link)) return link;
+		if (/^data:image\//i.test(link)) return link;
+		if (/^https?:\/\//i.test(link)) {
+			let data = encoded.get(link);
+			if (!data) {
+				try {
+					const url = new URL(link);
+					if (url.username || url.password) throw new Error();
+					const response = await requestUrl({ url: url.href, method: 'GET', throw: false });
+					const mime = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1].split(';')[0].trim().toLowerCase() || '';
+					if (response.status < 200 || response.status >= 300 || !/^image\/[a-z0-9.+-]+$/.test(mime) || !response.arrayBuffer.byteLength) throw new Error();
+					data = `data:${mime};base64,${arrayBufferToBase64(response.arrayBuffer)}`;
+					encoded.set(link, data);
+				} catch { throw new SubstackError(t('imageEmbedFailed')); }
+			}
+			return data;
+		}
 		const path = getLinkpath(link);
 		let attachment = app.metadataCache.getFirstLinkpathDest(path, file.path);
 		if (!attachment) {

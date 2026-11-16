@@ -19,6 +19,7 @@ await fs.mkdir(profile);
 for (const name of ['manifest.json', 'styles.css']) await fs.copyFile(name, path.join(destination, name));
 const bundle = await fs.readFile('main.js', 'utf8');
 const iconPath = (await fs.readFile('icon.svg', 'utf8')).match(/<path d="([^"]+)"/)[1];
+const pixelBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const postBundle = buildSync({ stdin: { contents: "export * from './plugin/post'; export * from './plugin/i18n'; export * from './plugin/settings'; export { MarkdownPreviewRenderer, Menu } from 'obsidian';", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'cjs', external: ['obsidian'] }).outputFiles[0].text;
 const prefix = `const hostRequire = require;
 const host = hostRequire('obsidian');
@@ -29,7 +30,14 @@ globalThis.toSubstackTestPending = false;
 globalThis.toSubstackPendingResponses = [];
 globalThis.toSubstackDrafts = [];
 globalThis.toSubstackImageUploads = [];
+globalThis.toSubstackLinkedImageDownloads = [];
 const fixtureApi = { ...host, requestUrl: async options => {
+ if (['https://images.example.invalid/linked?format=png', 'http://images.example.invalid/linked?format=png'].includes(options.url)) {
+  globalThis.toSubstackLinkedImageDownloads.push({ url: options.url, headers: options.headers ?? {} });
+  const mode = globalThis.toSubstackLinkedImageFailure;
+  if (mode === 'network') throw Error('Fixture download failed');
+  return { status: mode === 'http' ? 404 : 200, headers: { 'Content-Type': mode === 'mime' ? 'text/html' : 'image/png; charset=binary' }, arrayBuffer: mode === 'empty' ? new ArrayBuffer(0) : host.base64ToArrayBuffer('${pixelBase64}') };
+ }
  if (options.method === 'GET' && ['https://premiere-fixture.substack.com/api/v1/publication_settings', 'https://deuxieme-fixture.substack.com/api/v1/publication_settings'].includes(options.url)) return new Promise(resolve => { globalThis.toSubstackFinishLanguages = resolve; });
  if (options.method === 'POST' && ['https://premiere-fixture.substack.com/api/v1/image', 'https://deuxieme-fixture.substack.com/api/v1/image'].includes(options.url)) {
   globalThis.toSubstackImageUploads.push({ url: options.url, contentType: options.headers['Content-Type'], image: new URLSearchParams(options.body).get('image') });
@@ -59,7 +67,6 @@ await fs.writeFile(path.join(vault, '.obsidian/community-plugins.json'), '["to-s
 await fs.writeFile(path.join(vault, '.obsidian/core-plugins.json'), '["file-explorer"]');
 await fs.writeFile(path.join(vault, '.obsidian/app.json'), '{}');
 await fs.writeFile(path.join(vault, 'Test.md'), '---\ntitle: Ignorer les propriétés\n---\n# Un titre **en gras**\n\n*Un chapeau avec [un lien](https://example.org).*\n\nPremier paragraphe **gras** et *italique*.\n\n## Une section\n\n- Une entrée\n- Une autre\n\n> Une citation\n');
-const pixelBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 await fs.mkdir(path.join(vault, 'assets'));
 await fs.writeFile(path.join(vault, 'assets/pixel test.png'), Buffer.from(pixelBase64, 'base64'));
 await fs.appendFile(path.join(vault, 'Test.md'), '\n![[assets/pixel test.png|Petit pixel]]\n\n![Image Markdown](assets/pixel%20test.png)\n');
@@ -136,6 +143,44 @@ async function observeLoginLifecycle() {
    destroy();
   };
  })()`);
+}
+
+async function checkLinkedImages() {
+ const result = await main.evaluate(`(async () => {
+  const prepare = globalThis.toSubstackPreparePost;
+  const https = 'https://images.example.invalid/linked?format=png';
+  const http = 'http://images.example.invalid/linked?format=png';
+  const source = '![Linked image](' + https + ')\\n\\n<img src="' + https + '" alt="HTML image">\\n\\n![HTTP image](' + http + ')';
+  const file = await app.vault.create('Linked images.md', source);
+  const post = await prepare(app, file);
+  const note = await prepare(app, file, { forNote: true, selection: '![Selected image](' + https + ')' });
+  const image = new Image();
+  image.src = post.body.content[0].attrs.src;
+  await image.decode();
+  const failures = [];
+  for (const mode of ['http', 'mime', 'empty', 'network']) {
+   globalThis.toSubstackLinkedImageFailure = mode;
+   try { await prepare(app, file); failures.push('accepted'); }
+   catch (error) { failures.push(error.message); }
+  }
+  globalThis.toSubstackLinkedImageFailure = null;
+  return { post, note, width: image.naturalWidth, height: image.naturalHeight, failures,
+   downloads: globalThis.toSubstackLinkedImageDownloads, source, original: await app.vault.read(file) };
+ })()`);
+ assert.equal(result.post.body.content.length, 3);
+ for (const image of result.post.body.content) assert.equal(image.attrs.src, `data:image/png;base64,${pixelBase64}`);
+ assert.equal(result.post.body.content[0].attrs.alt, 'Linked image');
+ assert.equal(result.post.body.content[1].attrs.alt, 'HTML image');
+ assert.equal(result.note.body.content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+ assert.deepEqual([result.width, result.height], [1, 1]);
+ assert.deepEqual(result.downloads.slice(0, 3).map(request => request.url), [
+  'https://images.example.invalid/linked?format=png', 'http://images.example.invalid/linked?format=png', 'https://images.example.invalid/linked?format=png'
+ ]);
+ for (const request of result.downloads) assert.deepEqual(request.headers, {}, 'Never send Substack credentials to image hosts');
+ assert.equal(result.failures.length, 4);
+ for (const error of result.failures) assert.notEqual(error, 'accepted', 'An unavailable image must stop the export');
+ assert.equal(result.original, result.source);
+ console.log('Linked images: Markdown, HTML, Notes, base64 decoding, download reuse, failures and unchanged source pass.');
 }
 
 async function checkSessionReuse() {
@@ -686,6 +731,7 @@ try {
  await poll(() => main.evaluate(`Array.from(document.querySelectorAll('.modal [role="alert"]')).some(node => node.textContent === 'Could not upload an image to Substack. The draft was not created.')`), 'English image upload error');
  assert.equal(await main.evaluate(`globalThis.toSubstackDrafts.length`), 1, 'The English dialog must also stop before creating a partial draft');
  await main.evaluate(`globalThis.toSubstackEnglishModal.close()`);
+ await checkLinkedImages();
  await checkSessionReuse();
  console.log(JSON.stringify({ status: 'PASS', localImageEncoding: true, imageUpload: true, relativeImages: true, htmlImages: true, noteDraft: true, internalSubstackNavigation: true, foreignNavigationBlocked: true, nativeSettings: true, nativeSecretControl: true, desktopSessionCapture: true, returnToMinimizedLogin: true, newsletterList: true, visibleErrorAndRetry: true, disconnect: true, beforeUnloadDismissed: true, spaLogin: true, automaticReturnWithoutBrowserEvent: true, hiddenSettingsRestored: true, pendingRequestCancellation: true, retryAfterCancellation: true, nativeWindowClose: true, otherTabsClickable: true, settingsClosable: true, loginSandbox: sandbox, authenticatedSubstackRequests: false }));
 } catch (error) {
