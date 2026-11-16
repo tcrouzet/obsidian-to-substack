@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-to-substack",
-	"version": "0.0.20",
+	"version": "0.0.21",
 	"description": "Publish Obsidian notes on Substack.",
 	"main": "main.js",
 	"scripts": {
