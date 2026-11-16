@@ -64,7 +64,7 @@
   "categoriesFailed": "Impossible de charger les catégories de cette newsletter. Ouvrez le brouillon dans Substack pour le publier.",
   "invalidCategory": "Catégorie invalide.",
   "categorySaveFailed": "Substack ne confirme pas la catégorie choisie. Réessayez.",
-  "publishDraft": "Publier (web + email)",
+  "publishDraft": "Publier",
   "publishingDraft": "Publication de l’article…",
   "draftPublished": "« {title} » publié sur Substack.",
   "openPublishedPost": "Ouvrir l’article publié",

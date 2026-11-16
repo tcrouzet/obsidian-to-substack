@@ -260,6 +260,7 @@ export class PostModal extends Modal {
 		let busy = false;
 		let publicationAttempted = false;
 		let category: DropdownComponent | undefined;
+		let actions: Setting | undefined;
 		let publishButton: ButtonComponent | undefined;
 		let openButton: ButtonComponent;
 		const setBusy = (value: boolean): void => {
@@ -280,9 +281,10 @@ export class PostModal extends Modal {
 				for (const section of sections) dropdown.addOption(String(section.id), section.name);
 				dropdown.onChange(value => { sectionId = value ? Number(value) : null; });
 			});
-			new Setting(this.contentEl).addButton(button => {
+			actions = new Setting(this.contentEl);
+			actions.addButton(button => {
 				publishButton = button;
-				button.setButtonText(t('publishDraft')).setCta().onClick(async () => {
+				button.setButtonText(t('publishDraft')).onClick(async () => {
 					if (busy || publicationAttempted) return;
 					publicationAttempted = true;
 					setBusy(true);
@@ -305,7 +307,7 @@ export class PostModal extends Modal {
 			status.setText(error instanceof SubstackError ? error.message : t('categoriesFailed'));
 		}
 		if (!this.modalEl.isConnected) return;
-		new Setting(this.contentEl).addButton(button => {
+		(actions ?? new Setting(this.contentEl)).addButton(button => {
 			openButton = button;
 			button.setButtonText(t('openDraft')).onClick(async () => {
 				if (busy) return;

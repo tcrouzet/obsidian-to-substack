@@ -233,12 +233,12 @@ async function checkPublicationControls() {
   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishPublish`), 'Publish request sent');
   assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), [{draft_section_id:scenario === 'without-category' ? null : 7,section_chosen:true}]);
   assert.deepEqual(await main.evaluate(`globalThis.toSubstackPublishRequests`), [{send:true,share_automatically:false}]);
-  assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta').disabled`), true, 'Prevent duplicate publication');
+  assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('publishDraft')).disabled`), true, 'Prevent duplicate publication');
   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/p/published-article"]')`), false, 'Wait for publication confirmation');
   await main.evaluate(`globalThis.toSubstackFinishPublish()`);
   if (scenario === 'failure') {
    await poll(() => main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal [role="alert"]')?.textContent === globalThis.toSubstackUiCheck.t('draftPublicationUncertain')`), 'Uncertain publication error');
-   await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button.mod-cta').click()`);
+   await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('publishDraft')).click()`);
    assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`), 1, 'An uncertain publication must not be retried');
    await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('openDraft')).click()`);
    await poll(() => main.evaluate(`!globalThis.toSubstackPublicationModal.modalEl.isConnected`), 'Review uncertain publication and close');

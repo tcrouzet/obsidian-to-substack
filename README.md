@@ -33,7 +33,7 @@ Use **Refresh** to reload your newsletters, **Switch account** to connect anothe
 3. Select the newsletter and click **Create draft**.
 4. Follow **Open draft in Substack** to review your post.
 
-Each export creates a new draft. Once its language editions are ready, choose a **Category** if the newsletter has sections. Then choose **Publish (web + email)** to publish the article and email subscribers, or **Open draft in Substack**, at the bottom, to review it first. Opening the draft saves your category, opens Substack, and closes the plugin window. If publication cannot be confirmed, **Open draft in Substack** remains available; the plugin never retries publication automatically.
+Each export creates a new draft. Once its language editions are ready, choose a **Category** if the newsletter has sections. Then choose **Publish** to publish the article and email subscribers, or **Open draft in Substack** alongside it to review it first. Opening the draft saves your category, opens Substack, and closes the plugin window. If publication cannot be confirmed, **Open draft in Substack** remains available; the plugin never retries publication automatically.
 
 Under **Settings → To Substack → Language editions**, choose your notes' **Default language**, then check the other languages to add to Substack drafts. The default initially follows Obsidian's language when supported, or English otherwise. English, Spanish, German, Italian, European Portuguese, and French are supported; the other languages are initially checked. Uncheck every additional language to disable automatic editions. Your choices apply to future drafts.
 

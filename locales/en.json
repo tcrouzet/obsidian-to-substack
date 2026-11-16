@@ -64,7 +64,7 @@
   "categoriesFailed": "Could not load this newsletter's categories. Open the draft in Substack to publish it.",
   "invalidCategory": "Invalid category.",
   "categorySaveFailed": "Substack did not confirm the selected category. Please try again.",
-  "publishDraft": "Publish (web + email)",
+  "publishDraft": "Publish",
   "publishingDraft": "Publishing article…",
   "draftPublished": "“{title}” published on Substack.",
   "openPublishedPost": "Open published article",
