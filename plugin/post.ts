@@ -128,8 +128,19 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 	const component = new Component();
 	component.load();
 	try {
+		let metadata: unknown;
+		try { metadata = frontmatter?.exists ? parseYaml(frontmatter.frontmatter) : null; }
+		catch { throw new SubstackError(t('invalidFrontmatter')); }
+		const properties = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata as Record<string, unknown> : {};
 		await MarkdownRenderer.render(app, markdown.slice(frontmatter?.contentStart ?? 0), container, file.path, component);
+		const imageSource = typeof properties.image === 'string' ? properties.image.trim() : '';
+		let cover = imageSource ? container.createEl('img', { attr: { src: imageSource } }) : null;
 		await encodeImages(app, file, container);
+		if (cover) {
+			const duplicate = Array.from(container.querySelectorAll('img')).some(image => image !== cover && image.src === cover?.src);
+			cover.remove();
+			if (duplicate) cover = null;
+		}
 		container.querySelectorAll('button, .collapse-indicator, .heading-collapse-indicator, .list-collapse-indicator').forEach(node => node.remove());
 		const heading = options.forNote ? null : container.querySelector('h1');
 		const title = heading?.textContent?.trim() || file.basename;
@@ -150,15 +161,10 @@ export async function preparePost(app: App, file: TFile, options: { forNote?: bo
 			subtitle = first.content.map(node => node.type === 'hardBreak' ? ' ' : node.text || '').join('').replace(/\s+/g, ' ').trim();
 			body.shift();
 		}
-		if (!options.forNote && !subtitle && frontmatter?.exists) {
-			let metadata: unknown;
-			try { metadata = parseYaml(frontmatter.frontmatter); }
-			catch { throw new SubstackError(t('invalidFrontmatter')); }
-			if (metadata && typeof metadata === 'object' && 'metadescription' in metadata) {
-				const description = (metadata as Record<string, unknown>).metadescription;
-				if (typeof description === 'string') subtitle = description.replace(/\s+/g, ' ').trim();
-			}
+		if (!options.forNote && !subtitle && typeof properties.metadescription === 'string') {
+			subtitle = properties.metadescription.replace(/\s+/g, ' ').trim();
 		}
+		if (cover) body.unshift(...inline(cover, [], !options.forNote));
 		return { title, subtitle, body: { type: 'doc', content: body.length ? body : [{ type: 'paragraph' }] } };
 	} finally { component.unload(); }
 }

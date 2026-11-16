@@ -219,6 +219,52 @@ async function checkPublicationControls() {
  console.log('Publication UI: categories, email enabled by default, language ordering, confirmation, duplicate clicks and failure recovery pass.');
 }
 
+async function checkFrontmatterImage() {
+ const result = await main.evaluate(`(${(async function () {
+  const prepare = globalThis.toSubstackPreparePost;
+  const source = '---\nimage: assets/pixel%20test.png\nmetadescription: YAML subtitle\n---\n# Article title\n\n*Italic subtitle.*\n\nBody text.';
+  const file = await app.vault.create('Frontmatter image.md', source);
+  const article = await prepare(app, file);
+  const note = await prepare(app, file, { forNote: true });
+  const descriptionFile = await app.vault.create('Frontmatter image description.md', source.replace('*Italic subtitle.*\n\n', ''));
+  const description = await prepare(app, descriptionFile);
+  const duplicateFile = await app.vault.create('Frontmatter duplicate.md', source + '\n\n> ![[assets/pixel test.png|Existing image]]');
+  const duplicate = await prepare(app, duplicateFile);
+  const remoteSource = '---\nimage: https://images.example.invalid/linked?format=png\n---\n# Remote image\n\nBody.';
+  const remoteFile = await app.vault.create('Frontmatter remote image.md', remoteSource);
+  const remote = await prepare(app, remoteFile);
+  const remoteDuplicateFile = await app.vault.create('Frontmatter remote duplicate.md', remoteSource + '\n\n![Existing](https://images.example.invalid/linked?format=png)');
+  const beforeDuplicate = globalThis.toSubstackLinkedImageDownloads.length;
+  const remoteDuplicate = await prepare(app, remoteDuplicateFile);
+  const duplicateDownloads = globalThis.toSubstackLinkedImageDownloads.length - beforeDuplicate;
+  const missingFile = await app.vault.create('Frontmatter missing image.md', '---\nimage: missing-cover.png\n---\n# Title\n\nBody.');
+  const selection = await prepare(app, missingFile, { forNote: true, selection: 'Only this excerpt.' });
+  let missing = '';
+  try { await prepare(app, missingFile); } catch (error) { missing = error.message; }
+  return { article, note, description, duplicate, remote, remoteDuplicate, duplicateDownloads, selection, missing,
+   expectedMissing: globalThis.toSubstackUiCheck.t('imageNotFound', { file: 'missing-cover.png' }), source, original: await app.vault.read(file) };
+ }).toString()})()`);
+ for (const post of [result.article, result.note, result.description, result.remote]) {
+  assert.equal(post.body.content[0].type, 'image2', 'The YAML image must be first');
+  assert.equal(post.body.content[0].attrs.src, `data:image/png;base64,${pixelBase64}`);
+ }
+ assert.equal(result.article.title, 'Article title');
+ assert.equal(result.article.subtitle, 'Italic subtitle.');
+ assert.equal(result.description.subtitle, 'YAML subtitle');
+ assert.equal(result.article.body.content[1].content[0].text, 'Body text.');
+ assert.equal(result.note.body.content[1].type, 'heading');
+ for (const post of [result.duplicate, result.remoteDuplicate]) {
+  assert.equal(JSON.stringify(post.body).match(/"type":"image2"/g).length, 1, 'Never add an image already embedded in the text');
+  assert.equal(post.body.content[0].type, 'paragraph', 'Leave an existing image in its original position');
+ }
+ assert.equal(result.duplicateDownloads, 1, 'Reuse the download when the YAML image is already linked in the body');
+ assert.equal(result.selection.body.content.length, 1);
+ assert.equal(result.selection.body.content[0].content[0].text, 'Only this excerpt.');
+ assert.equal(result.missing, result.expectedMissing);
+ assert.equal(result.original, result.source);
+ console.log('YAML images: first image, local and remote sources, no duplicates, subtitles, Notes, selected text and missing files pass.');
+}
+
 async function checkImageCaptions() {
  const result = await main.evaluate(`(async () => {
   const source = '# Captions\\n\\n![Markdown caption](assets/pixel%20test.png)\\n\\n![[assets/pixel test.png|Wiki caption]]\\n\\n<figure><img src="assets/pixel%20test.png" alt="Accessible description"><figcaption>A <em>formatted</em> caption</figcaption></figure>\\n\\n![](assets/pixel%20test.png)';
@@ -846,6 +892,7 @@ try {
  await main.evaluate(`globalThis.toSubstackEnglishModal.close()`);
  await checkImageCaptions();
  await checkLinkedImages();
+ await checkFrontmatterImage();
  await checkSessionReuse();
  await checkPublicationControls();
  console.log(JSON.stringify({ status: 'PASS', localImageEncoding: true, imageUpload: true, relativeImages: true, htmlImages: true, noteDraft: true, internalSubstackNavigation: true, foreignNavigationBlocked: true, nativeSettings: true, nativeSecretControl: true, desktopSessionCapture: true, returnToMinimizedLogin: true, newsletterList: true, visibleErrorAndRetry: true, disconnect: true, beforeUnloadDismissed: true, spaLogin: true, automaticReturnWithoutBrowserEvent: true, hiddenSettingsRestored: true, pendingRequestCancellation: true, retryAfterCancellation: true, nativeWindowClose: true, otherTabsClickable: true, settingsClosable: true, loginSandbox: sandbox, authenticatedSubstackRequests: false }));
