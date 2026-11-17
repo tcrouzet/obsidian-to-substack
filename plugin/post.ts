@@ -1,6 +1,7 @@
 import { draftLanguageName, t } from './i18n';
 import { App, arrayBufferToBase64, ButtonComponent, Component, DropdownComponent, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, requestUrl, Setting, TFile } from 'obsidian';
 import type ToSubstackPlugin from './main';
+import { MastodonError, publishMastodonNote } from './mastodon';
 import { activateDraftLanguages, createDraft, getSections, Newsletter, publishDraft, publishNote, PostContent, PostNode, saveDraftSection, SubstackError } from './substack';
 
 const NOTE_DESTINATION = ':note';
@@ -196,7 +197,10 @@ export class PostModal extends Modal {
 		let selected = newsletters[0]?.subdomain || NOTE_DESTINATION;
 		let submit: ButtonComponent;
 		const description = this.contentEl.createEl('p');
-		const updateDescription = (): void => { description.setText(this.selectedMarkdown !== undefined ? t('publishSelectedText') : t(selected === NOTE_DESTINATION ? 'publishNoteFromNote' : 'createDraftFromNote', { note: this.file.basename })); };
+		const updateDescription = (): void => {
+			const mirror = !!this.plugin.mastodonAccount;
+			description.setText(this.selectedMarkdown !== undefined ? t(mirror ? 'publishSelectedTextBoth' : 'publishSelectedText') : t(selected === NOTE_DESTINATION ? mirror ? 'publishNoteBoth' : 'publishNoteFromNote' : 'createDraftFromNote', { note: this.file.basename }));
+		};
 		updateDescription();
 		new Setting(this.contentEl).setName(t('destination')).addDropdown(dropdown => {
 			dropdown.selectEl.setAttribute('aria-label', t('destination'));
@@ -226,6 +230,19 @@ export class PostModal extends Modal {
 						this.contentEl.empty();
 						this.contentEl.createEl('p', { text: t('notePublished') });
 						this.contentEl.createEl('a', { text: t('openNote'), href: url, attr: { target: '_blank', rel: 'noopener' } });
+						if (this.plugin.mastodonAccount) {
+							const mastodonStatus = this.contentEl.createEl('p', { text: t('publishingMastodon'), attr: { role: 'status', 'aria-live': 'polite' } });
+							try {
+								const mastodon = this.plugin.getMastodonSession();
+								if (!mastodon) throw new MastodonError(t('mastodonSessionExpired'));
+								const mastodonUrl = await publishMastodonNote(mastodon, post.body, url);
+								mastodonStatus.setText(t('mastodonPublished'));
+								this.contentEl.createEl('a', { text: t('openMastodonPost'), href: mastodonUrl, attr: { target: '_blank', rel: 'noopener' } });
+							} catch (error) {
+								mastodonStatus.setAttribute('role', 'alert');
+								mastodonStatus.setText(error instanceof MastodonError ? error.message : t('mastodonPublicationUncertain'));
+							}
+						}
 						return;
 					}
 					if (!newsletter) throw new SubstackError(t('invalidNewsletter'));

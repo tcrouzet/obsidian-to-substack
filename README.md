@@ -26,6 +26,16 @@ After checking your email, **Return to sign-in** brings the Substack window back
 
 Use **Refresh** to reload your newsletters, **Switch account** to connect another account, or **Disconnect** to remove the saved connection.
 
+## Connect Mastodon
+
+1. Under **Settings → To Substack → Mastodon account**, enter your **Mastodon server**, such as `mastodon.social`.
+2. Click **Sign in** and authorize To Substack in your browser.
+3. The browser returns to Obsidian and the connected account appears in the settings. Use **Disconnect** to stop mirroring and revoke the connection.
+
+While Mastodon is connected, publishing a Substack **Note** also posts its text and images to Mastodon. This applies to selected excerpts too; newsletter articles stay on Substack. If the text is too long for the server, it is shortened with `...` and its original links are kept in full at the end. No link to the Substack Note is added. If the original links alone cannot fit, the Mastodon copy is not sent and an error is shown. Images keep their alternative descriptions and must meet the server's image-count, format, and size limits.
+
+Substack is published first. Both post links are shown when Mastodon confirms the copy. If Mastodon fails, the confirmed Substack link stays available and the error is shown separately. The plugin never republishes the Substack Note to retry Mastodon, and never silently drops excess images.
+
 ## Create a draft from a note
 
 1. Right-click a Markdown note in Obsidian's file explorer.
@@ -98,7 +108,9 @@ Enable **Settings → To Substack → Export → Remove trailing tags** to omit 
 
 ## Account and privacy
 
-Creating a draft or publishing a Note sends the selected content and images to Substack. Publishing an article makes it public and emails subscribers. Opening a draft for review does not publish it. Linked images are downloaded from their hosts without your Substack session. Your session is kept in **Obsidian's secret storage**; the plugin settings contain only a reference to that secret.
+Creating a draft or publishing a Note sends the selected content and images to Substack. When Mastodon is connected, Notes are also sent to that Mastodon server. Publishing an article makes it public and emails subscribers. Opening a draft for review does not publish it. Linked images are downloaded from their hosts without your Substack session. Substack and Mastodon credentials are kept in **Obsidian's secret storage**; the plugin settings contain only secret references and the Mastodon server address.
+
+Mastodon authorization requests permission to identify your account and publish statuses and media. Its token is used only with the server you authorized. Mastodon passwords are entered in your browser, and the plugin does not receive them. Secret storage is local to each device; authorize Mastodon separately on each device you use.
 
 Disconnecting removes the connection and clears the session secret created by To Substack. Secrets you imported from elsewhere remain available in Obsidian's secret storage.
 

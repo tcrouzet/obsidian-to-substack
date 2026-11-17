@@ -14,6 +14,7 @@ export class SubstackSettingTab extends PluginSettingTab {
 
 	override async setControlValue(key: string, value: unknown): Promise<void> {
 		if (key === 'sessionSecretId') this.plugin.cancelConnection();
+		if (key === 'mastodonServer') this.plugin.cancelMastodonLogin();
 		await super.setControlValue(key, value);
 		this.update();
 	}
@@ -101,6 +102,27 @@ export class SubstackSettingTab extends PluginSettingTab {
 					name: t('substackSession'),
 					desc: t('manualSessionHelp'),
 					control: { type: 'secret', key: 'sessionSecretId', disabled: () => plugin.busy }
+				}]
+			},
+			{
+				type: 'group',
+				heading: t('mastodonAccount'),
+				items: [{
+					name: t('mastodonServer'),
+					desc: t('mastodonServerHelp'),
+					control: { type: 'text', key: 'mastodonServer', placeholder: 'mastodon.social', disabled: () => plugin.mastodonBusy || !!plugin.mastodonAccount }
+				}, {
+					name: plugin.mastodonAccount ? t('mastodonConnected', { account: plugin.mastodonAccount }) : t('notConnected'),
+					desc: plugin.mastodonError || t(plugin.hasMastodonLogin ? 'mastodonAwaitingAuthorization' : 'mastodonConnectionHelp'),
+					render: setting => {
+						setting.descEl.setAttribute('role', plugin.mastodonError ? 'alert' : 'status');
+						if (!plugin.mastodonAccount) setting.addButton(button => button.setButtonText(t(plugin.hasMastodonLogin ? 'returnToSignIn' : 'signIn'))
+							.setDisabled(plugin.mastodonBusy || !plugin.settings.mastodonServer.trim()).onClick(() => { void plugin.connectMastodon(); }));
+						if (plugin.settings.mastodonSecretId) setting.addButton(button => button.setButtonText(t('disconnect'))
+							.setDisabled(plugin.mastodonBusy).onClick(() => { void plugin.disconnectMastodon(); }));
+						if (plugin.hasMastodonLogin) setting.addButton(button => button.setButtonText(t('cancel'))
+							.setDisabled(plugin.mastodonBusy).onClick(() => { plugin.cancelMastodonLogin(); this.update(); }));
+					}
 				}]
 			}
 		];

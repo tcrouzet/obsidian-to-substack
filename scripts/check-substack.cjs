@@ -22,6 +22,7 @@ module.exports = (async () => {
 		addSettingTab(tab) { this.tab = tab; }
 		register(callback) { this.cleanup = callback; }
 		registerEvent() {}
+		registerObsidianProtocolHandler() {}
 	}
 	class PluginSettingTab {
 		constructor(app, plugin) { this.app = app; this.plugin = plugin; }
@@ -383,7 +384,7 @@ module.exports = (async () => {
 	await plugin.connect(false);
 	assert.equal(plugin.account.newsletters.length, 2);
 	assert.equal(plugin.tab.getSettingDefinitions()[1].items.length, 2);
-	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId,defaultLanguage,translationLanguages,removeTrailingTags');
+	assert.equal(Object.keys(plugin.saved).join(','), 'sessionSecretId,defaultLanguage,translationLanguages,removeTrailingTags,mastodonServer,mastodonSecretId');
 	assert.equal(JSON.stringify(plugin.saved).includes('fixture-session'), false);
 	const connectedAccount = plugin.account;
 	await plugin.tab.setControlValue('removeTrailingTags', true);
@@ -458,4 +459,5 @@ module.exports = (async () => {
 		assert.match(localizedPlugin.error, selectedLanguage === 'fr-CA' ? /refusée ou expirée/ : /Session rejected or expired/);
 	}
 	console.log('Substack: session validation, profile parsing, HTTP errors, native settings, secret references, cancelled requests and app-language selection pass.');
+	await require('./check-mastodon.cjs');
 })();

@@ -34,7 +34,40 @@ globalThis.toSubstackLinkedImageDownloads = [];
 globalThis.toSubstackSections = [];
 globalThis.toSubstackPublishRequests = [];
 globalThis.toSubstackSectionUpdates = [];
+globalThis.toSubstackMastodonRequests = [];
+globalThis.toSubstackFeedPosts = [];
+globalThis.toSubstackMastodonPosts = [];
+globalThis.toSubstackMastodonMedia = [];
 const fixtureApi = { ...host, requestUrl: async options => {
+ if (new URL(options.url).origin === 'https://mastodon.example') {
+  if (options.headers?.Cookie) throw Error('Substack cookies must not reach Mastodon');
+  const path = new URL(options.url).pathname;
+  globalThis.toSubstackMastodonRequests.push({path,method:options.method});
+  if(path === '/api/v1/apps') return {status:200,json:{client_id:'fixture-client',client_secret:'fixture-client-secret'}};
+  if(path === '/oauth/token') return {status:200,json:{access_token:'fixture-mastodon-token'}};
+  if(path === '/oauth/revoke') return {status:200,json:{}};
+  if(options.headers?.Authorization !== 'Bearer fixture-mastodon-token') return {status:401};
+  if(path === '/api/v1/accounts/verify_credentials') return {status:200,json:{id:'1',acct:'writer'}};
+  if(path === '/api/v2/instance') return {status:200,json:{configuration:{statuses:{max_characters:100,max_media_attachments:4,characters_reserved_per_url:23},media_attachments:{image_size_limit:100000,supported_mime_types:['image/png']}}}};
+  if(path === '/api/v2/media') {
+   const form=await new Request(options.url,{method:'POST',headers:{'Content-Type':options.headers['Content-Type']},body:options.body}).formData();
+   globalThis.toSubstackMastodonMedia.push({description:form.get('description'),bytes:(await form.get('file').arrayBuffer()).byteLength});
+   return {status:200,json:{id:'42',url:'https://images.example.invalid/pixel.png'}};
+  }
+  if(path === '/api/v1/statuses') {
+   globalThis.toSubstackMastodonPosts.push(JSON.parse(options.body));
+   await new Promise(resolve=>{globalThis.toSubstackFinishMastodonPost=resolve;});
+   return {status:globalThis.toSubstackMastodonFailure?500:200,json:{id:'1234',url:'https://mastodon.example/@writer/1234'}};
+  }
+  throw Error('Unexpected Mastodon fixture request');
+ }
+ if(options.url === 'https://substack.com/api/v1/comment/feed') {
+  if(options.headers.Authorization) throw Error('Mastodon credentials must not reach Substack');
+  globalThis.toSubstackFeedPosts.push(JSON.parse(options.body));
+  return {status:200,json:{id:455+globalThis.toSubstackFeedPosts.length}};
+ }
+ if(options.url === 'https://substack.com/api/v1/image') return {status:200,json:{url:'https://images.example.invalid/pixel.png'}};
+ if(options.url === 'https://substack.com/api/v1/comment/attachment') return {status:200,json:{id:'42'}};
  if (options.method === 'GET' && ['https://premiere-fixture.substack.com/api/v1/publication/sections', 'https://deuxieme-fixture.substack.com/api/v1/publication/sections'].includes(options.url)) return { status: 200, json: { sections: globalThis.toSubstackSections } };
  if (options.method === 'PUT' && options.url === 'https://premiere-fixture.substack.com/api/v1/drafts/123') {
   const update = JSON.parse(options.body);
@@ -160,6 +193,93 @@ async function observeLoginLifecycle() {
    destroy();
   };
  })()`);
+}
+
+async function checkMastodon() {
+ await main.evaluate(`(async () => {
+  app.setting.close();
+  const remote=window.require('electron').remote;
+  const win=remote.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL()==='app://obsidian.md/index.html');
+  remote.app.focus({steal:true});win.show();win.focus();
+  globalThis.toSubstackMastodonOriginalOpen=window.open;
+  globalThis.toSubstackMastodonAuthorizationUrls=[];
+  window.open=url=>{globalThis.toSubstackMastodonAuthorizationUrls.push(url);return null;};
+  const plugin=app.plugins.getPlugin('to-substack');
+  await plugin.settingsTab.setControlValue('mastodonServer','mastodon.example');
+  await plugin.connectMastodon();
+ })()`);
+ const authorization = await main.evaluate(`globalThis.toSubstackMastodonAuthorizationUrls[0]`);
+ const url = new URL(authorization);
+ assert.equal(url.origin, 'https://mastodon.example');
+ assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
+ assert.equal(new URL(url.searchParams.get('redirect_uri')).protocol, 'obsidian:');
+ await main.evaluate(`app.workspace.protocolHandler.handlers.get('to-substack-mastodon')({action:'to-substack-mastodon',state:'wrong',code:'fixture-code'})`);
+ assert.equal(await main.evaluate(`globalThis.toSubstackMastodonRequests.filter(request=>request.path==='/oauth/token').length`), 0);
+ await main.evaluate(`app.workspace.protocolHandler.handlers.get('to-substack-mastodon')({action:'to-substack-mastodon',state:${JSON.stringify(url.searchParams.get('state'))},code:'fixture-code'})`);
+ await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack').mastodonAccount==='writer@mastodon.example'`), 'Mastodon OAuth callback');
+ assert.deepEqual(await main.evaluate(`(async()=>{
+  const plugin=app.plugins.getPlugin('to-substack');const data=await plugin.loadData();
+  return {reference:data.mastodonSecretId,server:data.mastodonServer,containsToken:JSON.stringify(data).includes('fixture-mastodon-token')||JSON.stringify(data).includes('fixture-client-secret'),stored:JSON.parse(app.secretStorage.getSecret(data.mastodonSecretId)).accessToken==='fixture-mastodon-token',control:plugin.settingsTab.getSettingDefinitions().at(-1).items[0].control.key};
+ })()`), {reference:'to-substack-mastodon-session',server:'https://mastodon.example',containsToken:false,stored:true,control:'mastodonServer'});
+ await main.evaluate(`app.workspace.protocolHandler.handlers.get('to-substack-mastodon')({action:'to-substack-mastodon',state:${JSON.stringify(url.searchParams.get('state'))},code:'fixture-code'})`);
+ assert.equal(await main.evaluate(`globalThis.toSubstackMastodonRequests.filter(request=>request.path==='/oauth/token').length`), 1, 'Consume the callback only once');
+ await main.evaluate(`(async()=>{await app.plugins.unloadPlugin('to-substack');await app.plugins.loadPlugin('to-substack');})()`);
+ await poll(() => main.evaluate(`app.plugins.getPlugin('to-substack')?.mastodonAccount==='writer@mastodon.example'`), 'Restore Mastodon from secret storage');
+ assert.equal(await main.evaluate(`globalThis.toSubstackMastodonRequests.length`), 0, 'Restoring a session must not require another login');
+ await main.evaluate(`(()=>{
+  const plugin=app.plugins.getPlugin('to-substack');
+  app.secretStorage.setSecret('fixture-substack-session','substack.sid=fixture-desktop-session');
+  plugin.settings.sessionSecretId='fixture-substack-session';plugin.account={name:'Fixture',newsletters:[]};
+ })()`);
+ for(const failure of [false,true]) {
+  await main.evaluate(`(()=>{
+   const plugin=app.plugins.getPlugin('to-substack');
+   globalThis.toSubstackMastodonFailure=${failure};globalThis.toSubstackFinishMastodonPost=null;
+   globalThis.toSubstackMirrorModal=new globalThis.toSubstackUiCheck.PostModal(plugin,app.vault.getFileByPath('Test.md'),'Selected text. '.repeat(50)+'\\n\\n[Original article](https://example.org/original)\\n\\n![[assets/pixel test.png|A pixel]]');
+   globalThis.toSubstackMirrorModal.open();
+   if(!globalThis.toSubstackMirrorModal.contentEl.textContent.includes('Mastodon'))throw Error('The note must disclose Mastodon mirroring');
+   globalThis.toSubstackMirrorModal.modalEl.querySelector('button.mod-cta').click();
+  })()`);
+  await poll(() => main.evaluate(`!!globalThis.toSubstackFinishMastodonPost`), 'Mastodon copy submitted');
+  const count=failure?2:1;
+  const sourceLink=`https://substack.com/note/c-${455+count}`;
+  assert.equal(await main.evaluate(`globalThis.toSubstackFeedPosts.length`),count);
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackMirrorModal.contentEl.querySelector('a[href="${sourceLink}"]')`),true,'Keep the confirmed Substack result while Mastodon is pending');
+  const copied=await main.evaluate(`globalThis.toSubstackMastodonPosts.at(-1)`);
+  assert.ok(copied.status.endsWith('...\n\nhttps://example.org/original'));
+  assert.equal(copied.status.includes(sourceLink),false,'Do not add a Substack link to the Mastodon text');
+  assert.ok(Array.from(copied.status.replace('https://example.org/original','x'.repeat(23))).length<=100);
+  assert.deepEqual(copied.media_ids,['42']);
+  assert.equal(await main.evaluate(`globalThis.toSubstackMastodonMedia.at(-1).description`),'A pixel');
+  await main.evaluate(`globalThis.toSubstackFinishMastodonPost()`);
+  if(failure) {
+   await poll(() => main.evaluate(`globalThis.toSubstackMirrorModal.contentEl.querySelector('[role="alert"]')?.textContent===globalThis.toSubstackUiCheck.t('mastodonPublicationUncertain')`),'Mastodon failure shown independently');
+   assert.equal(await main.evaluate(`!!globalThis.toSubstackMirrorModal.contentEl.querySelector('a[href="${sourceLink}"]')`),true);
+  } else await poll(() => main.evaluate(`!!globalThis.toSubstackMirrorModal.contentEl.querySelector('a[href="https://mastodon.example/@writer/1234"]')`),'Mastodon post link');
+  assert.equal(await main.evaluate(`globalThis.toSubstackMastodonPosts.length`),count);
+  await main.evaluate(`globalThis.toSubstackMirrorModal.close()`);
+ }
+ await main.evaluate(`(()=>{
+  const plugin=app.plugins.getPlugin('to-substack');
+  plugin.account.newsletters=[{name:'Fixture newsletter',subdomain:'premiere-fixture'}];plugin.settings.translationLanguages=[];
+  globalThis.toSubstackFinishDraft=null;
+  globalThis.toSubstackMirrorModal=new globalThis.toSubstackUiCheck.PostModal(plugin,app.vault.getFileByPath('Test.md'));
+  globalThis.toSubstackMirrorModal.open();globalThis.toSubstackMirrorModal.modalEl.querySelector('button.mod-cta').click();
+ })()`);
+ await poll(() => main.evaluate(`!!globalThis.toSubstackFinishDraft`),'Create article with Mastodon connected');
+ await main.evaluate(`globalThis.toSubstackFinishDraft()`);
+ await poll(() => main.evaluate(`Array.from(globalThis.toSubstackMirrorModal.modalEl.querySelectorAll('button')).some(button=>button.textContent===globalThis.toSubstackUiCheck.t('openDraft'))`),'Article draft ready');
+ assert.equal(await main.evaluate(`globalThis.toSubstackMastodonPosts.length`),2,'Articles must not be copied to Mastodon');
+ await main.evaluate(`globalThis.toSubstackMirrorModal.close()`);
+ await main.evaluate(`app.plugins.getPlugin('to-substack').disconnectMastodon()`);
+ assert.deepEqual(await main.evaluate(`(()=>{const plugin=app.plugins.getPlugin('to-substack');return {account:plugin.mastodonAccount,reference:plugin.settings.mastodonSecretId,revoked:globalThis.toSubstackMastodonRequests.filter(request=>request.path==='/oauth/revoke').length,substack:!!plugin.account};})()`),{account:'',reference:'',revoked:1,substack:true});
+ await main.evaluate(`app.plugins.getPlugin('to-substack').connectMastodon()`);
+ const cancelledUrl=new URL(await main.evaluate(`globalThis.toSubstackMastodonAuthorizationUrls.at(-1)`));
+ const beforeCancelled=await main.evaluate(`globalThis.toSubstackMastodonRequests.length`);
+ await main.evaluate(`(()=>{app.plugins.getPlugin('to-substack').cancelMastodonLogin();app.workspace.protocolHandler.handlers.get('to-substack-mastodon')({action:'to-substack-mastodon',state:${JSON.stringify(cancelledUrl.searchParams.get('state'))},code:'cancelled-code'});})()`);
+ assert.equal(await main.evaluate(`globalThis.toSubstackMastodonRequests.length`),beforeCancelled,'Ignore a cancelled authorization callback');
+ await main.evaluate(`window.open=globalThis.toSubstackMastodonOriginalOpen`);
+ console.log('Native Mastodon: OAuth callback, replay protection, secret storage and reload, selected Notes, linked truncation, images, partial failure and disconnect pass.');
 }
 
 async function checkPublicationControls() {
@@ -745,7 +865,7 @@ try {
  })()`);
  if (!saved.stored) console.error('STORED COOKIE NAMES', JSON.stringify(saved.cookieNames));
  delete saved.cookieNames;
- assert.deepEqual(saved, { keys: ['sessionSecretId', 'defaultLanguage', 'translationLanguages', 'removeTrailingTags'], reference: 'obsidian-to-substack-session', stored: true });
+ assert.deepEqual(saved, { keys: ['sessionSecretId', 'defaultLanguage', 'translationLanguages', 'removeTrailingTags', 'mastodonServer', 'mastodonSecretId'], reference: 'obsidian-to-substack-session', stored: true });
 
  await main.evaluate(`globalThis.toSubstackTestDenied = true`);
  await clickButton('Actualiser');
@@ -977,7 +1097,7 @@ try {
   globalThis.toSubstackEnglishModal.open();
   return { headings: definitions.map(group => group.heading), status: definitions[0].items[0].name };
  })()`);
- assert.deepEqual(englishSettings.headings, ['Substack account', 'Newsletters', 'Language editions', 'Export', 'Manual connection']);
+ assert.deepEqual(englishSettings.headings, ['Substack account', 'Newsletters', 'Language editions', 'Export', 'Manual connection', 'Mastodon account']);
  assert.equal(englishSettings.status, 'Connected to Compte de test');
  const englishCreate = await poll(() => main.evaluate(`(() => {
   const button = [...document.querySelectorAll('.modal button')].find(node => node.textContent === 'Create draft');
@@ -997,6 +1117,7 @@ try {
  await checkFrontmatterCaption();
  await checkSessionReuse();
  await checkPublicationControls();
+ await checkMastodon();
  console.log(JSON.stringify({ status: 'PASS', localImageEncoding: true, imageUpload: true, relativeImages: true, htmlImages: true, noteDraft: true, internalSubstackNavigation: true, foreignNavigationBlocked: true, nativeSettings: true, nativeSecretControl: true, desktopSessionCapture: true, returnToMinimizedLogin: true, newsletterList: true, visibleErrorAndRetry: true, disconnect: true, beforeUnloadDismissed: true, spaLogin: true, automaticReturnWithoutBrowserEvent: true, hiddenSettingsRestored: true, pendingRequestCancellation: true, retryAfterCancellation: true, nativeWindowClose: true, otherTabsClickable: true, settingsClosable: true, loginSandbox: sandbox, authenticatedSubstackRequests: false }));
 } catch (error) {
  console.error(error);
