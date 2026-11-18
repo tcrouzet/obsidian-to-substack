@@ -298,13 +298,13 @@ async function checkPublicationControls() {
   globalThis.toSubstackOriginalOpen = window.open;
   window.open = url => { globalThis.toSubstackOpenedDrafts.push(url); return null; };
  })()`);
- for (const scenario of ['open', 'category', 'without-category', 'failure', 'save-failure']) {
+ for (const scenario of ['open', 'category', 'main-category', 'without-category', 'failure', 'save-failure']) {
   await main.evaluate(`(() => {
    globalThis.toSubstackPublishRequests = [];
    globalThis.toSubstackSectionUpdates = [];
    globalThis.toSubstackSections = ${scenario === 'without-category' ? '[]' : '[{id:7,name:"Essays",is_live:true}]'};
    globalThis.toSubstackOpenedDrafts = [];
-   globalThis.toSubstackHoldSectionUpdate = ${scenario === 'open'};
+   globalThis.toSubstackHoldSectionUpdate = ${scenario !== 'without-category'};
    globalThis.toSubstackSectionFailure = ${scenario === 'save-failure'};
    globalThis.toSubstackFinishSection = null;
    globalThis.toSubstackPublishFailure = ${scenario === 'failure'};
@@ -320,38 +320,50 @@ async function checkPublicationControls() {
   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishLanguages`), 'Publication waits for languages');
   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal button')`), false, 'No publish button while languages are pending');
   await main.evaluate(`globalThis.toSubstackFinishLanguages({status:200,json:{additional_post_languages_enabled:false}})`);
-  await poll(() => main.evaluate(`[...globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('.modal button')].some(button => button.textContent === globalThis.toSubstackUiCheck.t('publishDraft'))`), 'Publish controls ready');
-  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('select')`), scenario !== 'without-category', 'Only show categories when they exist');
-  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.checkbox-container')`), false, 'There is no email option');
-  assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).at(-1).textContent`), await main.evaluate(`globalThis.toSubstackUiCheck.t('openDraft')`), 'Open draft must be last');
-  await main.evaluate(`(() => {
-   const select = globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal select');
-   if(select) {select.value='7';select.dispatchEvent(new Event('change',{bubbles:true}));}
+  const chosenSection = scenario === 'main-category' || scenario === 'without-category' ? null : 7;
+  if(scenario !== 'without-category') {
+   await poll(() => main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('select')`), 'Category choice ready');
+   assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).some(button=>['publishDraft','openDraft'].some(key=>button.textContent===globalThis.toSubstackUiCheck.t(key)))`),false,'Wait for category selection before offering final actions');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`),[],'Do not save a category before an explicit choice');
+   assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('saveCategory')).disabled`),true);
+   await main.evaluate(`(()=>{
+    const select=globalThis.toSubstackPublicationModal.modalEl.querySelector('select');
+    select.value=${JSON.stringify(chosenSection === null ? '' : '7')};select.dispatchEvent(new Event('change',{bubbles:true}));
+    const button=Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('saveCategory'));
+    button.click();button.click();
+   })()`);
+   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishSection`), 'Save the chosen category');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`),[{draft_section_id:chosenSection,section_chosen:true}]);
+   assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).some(button=>['publishDraft','openDraft'].some(key=>button.textContent===globalThis.toSubstackUiCheck.t(key)))`),false,'Wait for the saved category confirmation before offering final actions');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`),[]);
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`),0);
+   await main.evaluate(`globalThis.toSubstackHoldSectionUpdate=false;globalThis.toSubstackFinishSection()`);
+   if(scenario === 'save-failure') {
+    await poll(() => main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('[role="alert"]')?.textContent === globalThis.toSubstackUiCheck.t('categorySaveFailed')`),'Category save failure');
+    assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).some(button=>['publishDraft','openDraft'].some(key=>button.textContent===globalThis.toSubstackUiCheck.t(key)))`),false,'A failed category save must not expose final actions');
+    assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('saveCategory')).disabled`),false,'Allow retrying a category save');
+    await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
+    continue;
+   }
+  }
+  await poll(() => main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).some(button=>button.textContent===globalThis.toSubstackUiCheck.t('publishDraft'))`),'Publish controls ready');
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('select')`),false,'Category step is complete');
+  assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.checkbox-container')`),false,'There is no email option');
+  assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).at(-1).textContent`),await main.evaluate(`globalThis.toSubstackUiCheck.t('openDraft')`),'Open draft must be last');
+  await main.evaluate(`(()=>{
    const buttons=Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button'));
-   const button=buttons.find(button=>button.textContent===globalThis.toSubstackUiCheck.t(${JSON.stringify(scenario === 'open' || scenario === 'save-failure' ? 'openDraft' : 'publishDraft')}));
+   const button=buttons.find(button=>button.textContent===globalThis.toSubstackUiCheck.t(${JSON.stringify(scenario === 'open' ? 'openDraft' : 'publishDraft')}));
    button.click();button.click();
   })()`);
-  if (scenario === 'open') {
-   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishSection`), 'Save category before opening');
-   assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), [{draft_section_id:7,section_chosen:true}]);
-   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`), []);
-   assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.isConnected`), true, 'Keep the window open until the category is saved');
-   await main.evaluate(`globalThis.toSubstackFinishSection()`);
-   await poll(() => main.evaluate(`!globalThis.toSubstackPublicationModal.modalEl.isConnected`), 'Open draft closes the plugin window');
-   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`), ['https://premiere-fixture.substack.com/publish/post/123']);
-   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`), 0, 'Viewing the draft must not publish it');
-   continue;
-  }
-  if (scenario === 'save-failure') {
-   await poll(() => main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('[role="alert"]')?.textContent === globalThis.toSubstackUiCheck.t('categorySaveFailed')`), 'Category save failure');
-   assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.isConnected`), true);
-   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`), []);
-   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`), 0);
-   await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
+  if(scenario === 'open') {
+   await poll(() => main.evaluate(`!globalThis.toSubstackPublicationModal.modalEl.isConnected`),'Open draft closes the plugin window');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`),['https://premiere-fixture.substack.com/publish/post/123']);
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`),[{draft_section_id:7,section_chosen:true}]);
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`),0,'Viewing the draft must not publish it');
    continue;
   }
   await poll(() => main.evaluate(`!!globalThis.toSubstackFinishPublish`), 'Publish request sent');
-  assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), [{draft_section_id:scenario === 'without-category' ? null : 7,section_chosen:true}]);
+  assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`), Array.from({length:scenario === 'without-category'?1:2},()=>({draft_section_id:chosenSection,section_chosen:true})));
   assert.deepEqual(await main.evaluate(`globalThis.toSubstackPublishRequests`), [{send:true,share_automatically:false}]);
   assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('publishDraft')).disabled`), true, 'Prevent duplicate publication');
   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.modal a[href$="/p/published-article"]')`), false, 'Wait for publication confirmation');

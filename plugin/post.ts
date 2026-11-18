@@ -274,32 +274,23 @@ export class PostModal extends Modal {
 		const status = this.contentEl.createEl('p', { text: t('loadingCategories'), attr: { role: 'status', 'aria-live': 'polite' } });
 		let sectionId: number | null = null;
 		let categoriesLoaded = false;
+		let categorySaved = false;
 		let busy = false;
 		let publicationAttempted = false;
 		let category: DropdownComponent | undefined;
-		let actions: Setting | undefined;
+		let categoryButton: ButtonComponent | undefined;
 		let publishButton: ButtonComponent | undefined;
-		let openButton: ButtonComponent;
+		let openButton: ButtonComponent | undefined;
 		const setBusy = (value: boolean): void => {
 			busy = value;
 			category?.setDisabled(value || publicationAttempted);
+			categoryButton?.setDisabled(value || category?.getValue() === ':choose');
 			publishButton?.setDisabled(value || publicationAttempted);
-			openButton.setDisabled(value);
+			openButton?.setDisabled(value);
 		};
-		try {
-			const sections = await getSections(session, newsletter);
-			if (!this.modalEl.isConnected) return;
-			categoriesLoaded = true;
-			status.empty();
-			if (sections.length) new Setting(this.contentEl).setName(t('category')).addDropdown(dropdown => {
-				category = dropdown;
-				dropdown.selectEl.setAttribute('aria-label', t('category'));
-				dropdown.addOption('', t('mainPublication'));
-				for (const section of sections) dropdown.addOption(String(section.id), section.name);
-				dropdown.onChange(value => { sectionId = value ? Number(value) : null; });
-			});
-			actions = new Setting(this.contentEl);
-			actions.addButton(button => {
+		const showActions = (): void => {
+			const actions = new Setting(this.contentEl);
+			if (categoriesLoaded) actions.addButton(button => {
 				publishButton = button;
 				button.setButtonText(t('publishDraft')).onClick(async () => {
 					if (busy || publicationAttempted) return;
@@ -319,26 +310,65 @@ export class PostModal extends Modal {
 					} finally { setBusy(false); }
 				});
 			});
+			actions.addButton(button => {
+				openButton = button;
+				button.setButtonText(t('openDraft')).onClick(async () => {
+					if (busy) return;
+					setBusy(true);
+					try {
+						if (categoriesLoaded && !categorySaved && !publicationAttempted) await saveDraftSection(session, newsletter, draftId, sectionId);
+						if (!this.modalEl.isConnected) return;
+						window.open(`https://${newsletter.subdomain}.substack.com/publish/post/${draftId}`, '_blank', 'noopener');
+						this.close();
+					} catch (error) {
+						status.setAttribute('role', 'alert');
+						status.setText(error instanceof SubstackError ? error.message : t('categorySaveFailed'));
+					} finally { setBusy(false); }
+				});
+			});
+		};
+		try {
+			const sections = await getSections(session, newsletter);
+			if (!this.modalEl.isConnected) return;
+			categoriesLoaded = true;
+			status.empty();
+			if (sections.length) {
+				const choice = new Setting(this.contentEl).setName(t('category')).addDropdown(dropdown => {
+					category = dropdown;
+					dropdown.selectEl.setAttribute('aria-label', t('category'));
+					dropdown.addOption(':choose', t('chooseCategory'));
+					dropdown.addOption('', t('mainPublication'));
+					for (const section of sections) dropdown.addOption(String(section.id), section.name);
+					dropdown.setValue(':choose').onChange(value => {
+						sectionId = value && value !== ':choose' ? Number(value) : null;
+						categoryButton?.setDisabled(value === ':choose');
+					});
+				}).addButton(button => {
+					categoryButton = button;
+					button.setButtonText(t('saveCategory')).setDisabled(true).onClick(async () => {
+						if (busy || category?.getValue() === ':choose') return;
+						setBusy(true);
+						status.setAttribute('role', 'status');
+						status.setText(t('savingCategory'));
+						try {
+							await saveDraftSection(session, newsletter, draftId, sectionId);
+							if (!this.modalEl.isConnected) return;
+							categorySaved = true;
+							choice.settingEl.remove();
+							status.empty();
+							showActions();
+						} catch (error) {
+							status.setAttribute('role', 'alert');
+							status.setText(error instanceof SubstackError ? error.message : t('categorySaveFailed'));
+						} finally { setBusy(false); }
+					});
+				});
+				return;
+			}
 		} catch (error) {
 			status.setAttribute('role', 'alert');
 			status.setText(error instanceof SubstackError ? error.message : t('categoriesFailed'));
 		}
-		if (!this.modalEl.isConnected) return;
-		(actions ?? new Setting(this.contentEl)).addButton(button => {
-			openButton = button;
-			button.setButtonText(t('openDraft')).onClick(async () => {
-				if (busy) return;
-				setBusy(true);
-				try {
-					if (categoriesLoaded && !publicationAttempted) await saveDraftSection(session, newsletter, draftId, sectionId);
-					if (!this.modalEl.isConnected) return;
-					window.open(`https://${newsletter.subdomain}.substack.com/publish/post/${draftId}`, '_blank', 'noopener');
-					this.close();
-				} catch (error) {
-					status.setAttribute('role', 'alert');
-					status.setText(error instanceof SubstackError ? error.message : t('categorySaveFailed'));
-				} finally { setBusy(false); }
-			});
-		});
+		if (this.modalEl.isConnected) showActions();
 	}
 }
