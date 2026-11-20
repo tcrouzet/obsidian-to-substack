@@ -298,7 +298,7 @@ async function checkPublicationControls() {
   globalThis.toSubstackOriginalOpen = window.open;
   window.open = url => { globalThis.toSubstackOpenedDrafts.push(url); return null; };
  })()`);
- for (const scenario of ['open', 'category', 'main-category', 'without-category', 'failure', 'save-failure']) {
+ for (const scenario of ['open', 'close', 'close-pending', 'category', 'main-category', 'without-category', 'failure', 'save-failure']) {
   await main.evaluate(`(() => {
    globalThis.toSubstackPublishRequests = [];
    globalThis.toSubstackSectionUpdates = [];
@@ -325,23 +325,30 @@ async function checkPublicationControls() {
    await poll(() => main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('select')`), 'Category choice ready');
    assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).some(button=>['publishDraft','openDraft'].some(key=>button.textContent===globalThis.toSubstackUiCheck.t(key)))`),false,'Wait for category selection before offering final actions');
    assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`),[],'Do not save a category before an explicit choice');
-   assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('saveCategory')).disabled`),true);
+   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('button')`),false,'Category selection must not require a confirmation button');
    await main.evaluate(`(()=>{
     const select=globalThis.toSubstackPublicationModal.modalEl.querySelector('select');
     select.value=${JSON.stringify(chosenSection === null ? '' : '7')};select.dispatchEvent(new Event('change',{bubbles:true}));
-    const button=Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('saveCategory'));
-    button.click();button.click();
    })()`);
    await poll(() => main.evaluate(`!!globalThis.toSubstackFinishSection`), 'Save the chosen category');
    assert.deepEqual(await main.evaluate(`globalThis.toSubstackSectionUpdates`),[{draft_section_id:chosenSection,section_chosen:true}]);
    assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).some(button=>['publishDraft','openDraft'].some(key=>button.textContent===globalThis.toSubstackUiCheck.t(key)))`),false,'Wait for the saved category confirmation before offering final actions');
    assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`),[]);
    assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`),0);
+   if(scenario === 'close-pending') await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
    await main.evaluate(`globalThis.toSubstackHoldSectionUpdate=false;globalThis.toSubstackFinishSection()`);
+   if(scenario === 'close-pending') {
+    assert.equal(await main.evaluate(`globalThis.toSubstackDraftSection`),7,'Keep the category when the dialog closes during its save');
+    assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.isConnected`),false);
+    assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`),0,'Closing must leave the article as a draft');
+    assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`),[]);
+    continue;
+   }
    if(scenario === 'save-failure') {
     await poll(() => main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('[role="alert"]')?.textContent === globalThis.toSubstackUiCheck.t('categorySaveFailed')`),'Category save failure');
     assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).some(button=>['publishDraft','openDraft'].some(key=>button.textContent===globalThis.toSubstackUiCheck.t(key)))`),false,'A failed category save must not expose final actions');
-    assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('saveCategory')).disabled`),false,'Allow retrying a category save');
+    assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('select').disabled`),false,'Allow choosing a category again after a failed save');
+    assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.querySelector('select').value`),':choose','Allow retrying the same category');
     await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
     continue;
    }
@@ -350,6 +357,14 @@ async function checkPublicationControls() {
   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('select')`),false,'Category step is complete');
   assert.equal(await main.evaluate(`!!globalThis.toSubstackPublicationModal.modalEl.querySelector('.checkbox-container')`),false,'There is no email option');
   assert.equal(await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).at(-1).textContent`),await main.evaluate(`globalThis.toSubstackUiCheck.t('openDraft')`),'Open draft must be last');
+  if(scenario === 'close') {
+   await main.evaluate(`Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button')).find(button=>button.textContent===globalThis.toSubstackUiCheck.t('close')).click()`);
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublicationModal.modalEl.isConnected`),false);
+   assert.equal(await main.evaluate(`globalThis.toSubstackDraftSection`),7,'Close keeps the saved category');
+   assert.equal(await main.evaluate(`globalThis.toSubstackPublishRequests.length`),0,'Close leaves the article as a draft');
+   assert.deepEqual(await main.evaluate(`globalThis.toSubstackOpenedDrafts`),[]);
+   continue;
+  }
   await main.evaluate(`(()=>{
    const buttons=Array.from(globalThis.toSubstackPublicationModal.modalEl.querySelectorAll('button'));
    const button=buttons.find(button=>button.textContent===globalThis.toSubstackUiCheck.t(${JSON.stringify(scenario === 'open' ? 'openDraft' : 'publishDraft')}));
@@ -379,7 +394,7 @@ async function checkPublicationControls() {
   await main.evaluate(`globalThis.toSubstackPublicationModal.close()`);
  }
  await main.evaluate(`window.open = globalThis.toSubstackOriginalOpen`);
- console.log('Publication UI: category saved, open draft last and close, web and email publishing, duplicate clicks and failure recovery pass.');
+ console.log('Publication UI: category autosave, closing during and after save without publishing, open draft last, web and email publication, duplicate clicks and failure recovery pass.');
 }
 
 async function checkFrontmatterCaption() {

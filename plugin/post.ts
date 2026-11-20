@@ -278,18 +278,22 @@ export class PostModal extends Modal {
 		let busy = false;
 		let publicationAttempted = false;
 		let category: DropdownComponent | undefined;
-		let categoryButton: ButtonComponent | undefined;
+		let closeButton: ButtonComponent | undefined;
 		let publishButton: ButtonComponent | undefined;
 		let openButton: ButtonComponent | undefined;
 		const setBusy = (value: boolean): void => {
 			busy = value;
 			category?.setDisabled(value || publicationAttempted);
-			categoryButton?.setDisabled(value || category?.getValue() === ':choose');
+			closeButton?.setDisabled(value);
 			publishButton?.setDisabled(value || publicationAttempted);
 			openButton?.setDisabled(value);
 		};
 		const showActions = (): void => {
 			const actions = new Setting(this.contentEl);
+			actions.addButton(button => {
+				closeButton = button;
+				button.setButtonText(t('close')).onClick(() => { if (!busy) this.close(); });
+			});
 			if (categoriesLoaded) actions.addButton(button => {
 				publishButton = button;
 				button.setButtonText(t('publishDraft')).onClick(async () => {
@@ -339,14 +343,9 @@ export class PostModal extends Modal {
 					dropdown.addOption(':choose', t('chooseCategory'));
 					dropdown.addOption('', t('mainPublication'));
 					for (const section of sections) dropdown.addOption(String(section.id), section.name);
-					dropdown.setValue(':choose').onChange(value => {
-						sectionId = value && value !== ':choose' ? Number(value) : null;
-						categoryButton?.setDisabled(value === ':choose');
-					});
-				}).addButton(button => {
-					categoryButton = button;
-					button.setButtonText(t('saveCategory')).setDisabled(true).onClick(async () => {
-						if (busy || category?.getValue() === ':choose') return;
+					dropdown.setValue(':choose').onChange(async value => {
+						if (busy || value === ':choose') return;
+						sectionId = value ? Number(value) : null;
 						setBusy(true);
 						status.setAttribute('role', 'status');
 						status.setText(t('savingCategory'));
@@ -358,6 +357,7 @@ export class PostModal extends Modal {
 							status.empty();
 							showActions();
 						} catch (error) {
+							dropdown.setValue(':choose');
 							status.setAttribute('role', 'alert');
 							status.setText(error instanceof SubstackError ? error.message : t('categorySaveFailed'));
 						} finally { setBusy(false); }
