@@ -83,7 +83,7 @@ A YAML `image` property containing a vault path or an image URL supplies the fir
 
 Use YAML `caption` for this image's caption. It appears as an image caption in articles and as italic text in Notes. If the image is already embedded in the body, its existing caption is preserved.
 
-Local and linked images are encoded in base64 and uploaded to the selected newsletter before the draft is created. Their position and alternative text are preserved, and a repeated image is uploaded once per draft. Image labels become visible captions; an HTML figure's explicit caption takes priority and keeps its formatting. The files in your vault are left intact.
+Local and linked images are resized to a maximum width of 1,600 pixels, encoded in base64, and uploaded when creating the Substack draft or publishing the Note. Smaller images retain their size. Local Markdown keeps its original image links; encoded images are never written back to the note. Their position and alternative text are preserved, and a repeated image is uploaded once per draft. Image labels become visible captions; an HTML figure's explicit caption takes priority and keeps its formatting. The files in your vault are left intact.
 
 If an image cannot be found or uploaded, the plugin stops before creating the draft and shows an error. If a connection error leaves the result of draft creation uncertain, check your Substack drafts before trying again.
 

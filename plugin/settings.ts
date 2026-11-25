@@ -124,7 +124,8 @@ export class SubstackSettingTab extends PluginSettingTab {
 							.setDisabled(plugin.mastodonBusy).onClick(() => { plugin.cancelMastodonLogin(); this.update(); }));
 					}
 				}]
-			}
+			},
+			...plugin.developmentSettings()
 		];
 	}
 }

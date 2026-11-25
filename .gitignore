@@ -30,3 +30,7 @@ temp
 
 # Installed linguistic data and local caches
 /data/
+
+# Private local promotion module
+/private/
+/private.sh

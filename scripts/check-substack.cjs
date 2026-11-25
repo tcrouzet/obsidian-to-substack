@@ -266,6 +266,8 @@ module.exports = (async () => {
 	};
 	assert.equal(await publishNote('token', { type: 'doc', content: [imageNode, imageNode] }), 'https://substack.com/note/c-457');
 	assert.equal(requests.length, beforeNoteImages + 3, 'Repeated images must be uploaded and attached once');
+	assert.equal(await publishNote('token', { type: 'doc', content: [{ type: 'image2', attrs: { src: dataUri, fullscreen: false } }] }), 'https://substack.com/note/c-457', 'An image-only Note needs neither text nor alt text nor a caption');
+	assert.deepEqual(JSON.parse(requests.at(-1).body).bodyJson.content, [{ type: 'paragraph' }]);
 	for (const response of [{ status: 500 }, { status: 200, json: { url: 'javascript:alert(1)' } }]) {
 		respond = () => response;
 		const beforeFailure = requests.length;

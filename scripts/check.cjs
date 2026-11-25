@@ -58,7 +58,7 @@ assert.ok(new pluginModule.exports.default() instanceof Plugin);
 console.log('Source lint, version consistency and plugin export: pass.');
 require('./check-i18n.cjs');
 
-require('./check-substack.cjs').then(() => {
+require('./check-images.cjs').then(() => require('./check-substack.cjs')).then(() => {
 	require('./check-release.cjs');
 }).catch(error => {
 	console.error(error);

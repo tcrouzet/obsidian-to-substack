@@ -1,66 +1,13 @@
+import {encodeImages} from './images';
 import { draftLanguageName, t } from './i18n';
-import { App, arrayBufferToBase64, ButtonComponent, Component, DropdownComponent, getFrontMatterInfo, getLinkpath, MarkdownRenderer, Modal, parseYaml, requestUrl, Setting, TFile } from 'obsidian';
+import { App, ButtonComponent, Component, DropdownComponent, getFrontMatterInfo, MarkdownRenderer, Modal, parseYaml, Setting, TFile } from 'obsidian';
 import type ToSubstackPlugin from './main';
 import { MastodonError, publishMastodonNote } from './mastodon';
 import { activateDraftLanguages, createDraft, getSections, Newsletter, publishDraft, publishNote, PostContent, PostNode, saveDraftSection, SubstackError } from './substack';
 
 const NOTE_DESTINATION = ':note';
 
-async function encodeImages(app: App, file: TFile, container: HTMLElement): Promise<void> {
-	const encoded = new Map<string, string>();
-	const encode = async (link: string): Promise<string> => {
-		if (/^data:image\//i.test(link)) return link;
-		if (/^https?:\/\//i.test(link)) {
-			let data = encoded.get(link);
-			if (!data) {
-				try {
-					const url = new URL(link);
-					if (url.username || url.password) throw new Error();
-					const response = await requestUrl({ url: url.href, method: 'GET', throw: false });
-					const mime = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1].split(';')[0].trim().toLowerCase() || '';
-					if (response.status < 200 || response.status >= 300 || !/^image\/[a-z0-9.+-]+$/.test(mime) || !response.arrayBuffer.byteLength) throw new Error();
-					data = `data:${mime};base64,${arrayBufferToBase64(response.arrayBuffer)}`;
-					encoded.set(link, data);
-				} catch { throw new SubstackError(t('imageEmbedFailed')); }
-			}
-			return data;
-		}
-		const path = getLinkpath(link);
-		let attachment = app.metadataCache.getFirstLinkpathDest(path, file.path);
-		if (!attachment) {
-			try { attachment = app.metadataCache.getFirstLinkpathDest(decodeURIComponent(path), file.path); } catch { /* A filename may contain a literal percent sign. */ }
-		}
-		if (!attachment) {
-			// Obsidian rewrites HTML image sources to vault resource URLs.
-			try {
-				const source = new URL(app.vault.getResourcePath(file));
-				const destination = new URL(link);
-				const sourcePath = decodeURIComponent(source.pathname);
-				const destinationPath = decodeURIComponent(destination.pathname);
-				const root = sourcePath.slice(0, -file.path.length);
-				if (source.protocol === destination.protocol && source.host === destination.host && sourcePath.endsWith(file.path) && destinationPath.startsWith(root)) {
-					attachment = app.vault.getFileByPath(destinationPath.slice(root.length));
-				}
-			} catch { /* Relative links have already been resolved through the metadata cache. */ }
-		}
-		if (!attachment) throw new SubstackError(t('imageNotFound', { file: link }));
-		const mime = ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif', bmp: 'image/bmp' } as Record<string, string>)[attachment.extension.toLowerCase()];
-		if (!mime) throw new SubstackError(t('unsupportedImage', { file: attachment.name }));
-		let data = encoded.get(attachment.path);
-		if (!data) {
-			data = `data:${mime};base64,${arrayBufferToBase64(await app.vault.readBinary(attachment))}`;
-			encoded.set(attachment.path, data);
-		}
-		return data;
-	};
-	for (const embed of Array.from(container.querySelectorAll<HTMLElement>('.internal-embed'))) {
-		const image = createEl('img');
-		image.src = await encode(embed.getAttribute('src') || '');
-		image.alt = embed.getAttribute('alt') || '';
-		embed.replaceWith(image);
-	}
-	for (const image of Array.from(container.querySelectorAll('img'))) image.src = await encode(image.getAttribute('src') || '');
-}
+
 
 function inline(node: Node, marks: NonNullable<PostNode['marks']> = [], includeCaptions = false): PostNode[] {
 	if (node.nodeType === Node.TEXT_NODE) return node.textContent ? [{ type: 'text', text: node.textContent, ...(marks.length ? { marks } : {}) }] : [];

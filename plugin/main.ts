@@ -1,3 +1,5 @@
+import { installDevelopment } from './development';
+import type { SettingDefinitionItem } from 'obsidian';
 import { setLocale, t } from './i18n';
 import { addIcon, getLanguage, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
 import substackIcon from '../icon.svg';
@@ -11,6 +13,9 @@ const SESSION_SECRET = 'obsidian-to-substack-session';
 const MASTODON_SECRET = 'to-substack-mastodon-session';
 
 export default class ToSubstackPlugin extends Plugin {
+	developmentSettings: () => SettingDefinitionItem[] = () => [];
+	refreshDevelopmentSettings(): void { this.settingsTab.update(); }
+
 	settings = { sessionSecretId: '', defaultLanguage: 'en' as DraftLanguage, translationLanguages: [...DRAFT_LANGUAGES], removeTrailingTags: false, mastodonServer: '', mastodonSecretId: '' };
 	account: SubstackAccount | null = null;
 	activity = '';
@@ -63,6 +68,7 @@ export default class ToSubstackPlugin extends Plugin {
 			if (session) { this.mastodonAccount = session.account; this.settings.mastodonServer = session.server; }
 		} catch { this.mastodonError = t('mastodonSessionExpired'); }
 		this.settingsTab = new SubstackSettingTab(this.app, this);
+		await installDevelopment(this);
 		this.addSettingTab(this.settingsTab);
 		this.register(() => { this.cancelConnection(); this.cancelMastodonLogin(); });
 		this.registerObsidianProtocolHandler('to-substack-mastodon', params => { void this.finishMastodonLogin(params); });
