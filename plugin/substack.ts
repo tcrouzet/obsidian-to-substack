@@ -160,6 +160,7 @@ export async function publishDraft(session: string, newsletter: Newsletter, draf
 export async function publishNote(session: string, body: PostNode): Promise<string> {
 	const images = new Set<string>();
 	let hasText = false;
+	const linkHref = (node: PostNode): string | undefined => node.type === 'text' ? node.marks?.find(mark => mark.type === 'link' && /^(https?:\/\/|mailto:|#)/i.test(mark.attrs?.href || ''))?.attrs?.href : undefined;
 	const convert = (node: PostNode): PostNode | null => {
 		if (node.type === 'image2') {
 			const src = node.attrs?.src;
@@ -176,8 +177,19 @@ export async function publishNote(session: string, body: PostNode): Promise<stri
 		if (node.text?.trim()) hasText = true;
 		if (node.type === 'hardBreak') return { type: 'text', text: '\n' };
 		if (node.type === 'horizontal_rule') return { type: 'paragraph', content: [{ type: 'text', text: '---' }] };
-		const content = node.content?.map(convert).filter((child): child is PostNode => child !== null);
-		const marks = node.marks?.map(mark => ({ ...mark, type: mark.type === 'strong' ? 'bold' : mark.type === 'em' ? 'italic' : mark.type }));
+		const content = node.content?.reduce<PostNode[]>((children, child, index, siblings) => {
+			const converted = convert(child);
+			if (!converted) return children;
+			children.push(converted);
+			const href = linkHref(child);
+			if (!href || (siblings[index + 1] && linkHref(siblings[index + 1]) === href)) return children;
+			let start = index;
+			while (start > 0 && linkHref(siblings[start - 1]) === href) start--;
+			const label = siblings.slice(start, index + 1).map(part => part.text || '').join('');
+			if (label !== href) children.push({ type: 'text', text: ` (${href})` });
+			return children;
+		}, []);
+		const marks = node.marks?.filter(mark => mark.type !== 'link').map(mark => ({ ...mark, type: mark.type === 'strong' ? 'bold' : mark.type === 'em' ? 'italic' : mark.type }));
 		if (node.type === 'heading') return { type: 'paragraph', content: content?.map(child => child.type === 'text' && !child.marks?.some(mark => mark.type === 'bold') ? { ...child, marks: [...child.marks || [], { type: 'bold' }] } : child) };
 		if (node.type === 'doc') return { type: 'doc', attrs: { schemaVersion: 'v1' }, content: content?.length ? content : [{ type: 'paragraph' }] };
 		return { ...node, ...(content ? { content } : {}), ...(marks ? { marks } : {}) };

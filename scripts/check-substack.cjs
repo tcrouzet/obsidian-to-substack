@@ -239,10 +239,23 @@ module.exports = (async () => {
 	assert.equal(notePayload.bodyJson.attrs.schemaVersion, 'v1');
 	assert.deepEqual(notePayload.bodyJson.content[0], { type: 'paragraph', content: [{ type: 'text', text: 'Title', marks: [{ type: 'bold' }] }] });
 	assert.deepEqual(notePayload.bodyJson.content[1], { type: 'paragraph', content: [{ type: 'text', text: 'Opening paragraph', marks: [{ type: 'italic' }] }] });
-	assert.deepEqual(notePayload.bodyJson.content[2].content[0].marks, noteBody.content[2].content[0].marks);
-	assert.deepEqual(notePayload.bodyJson.content[2].content[1], { type: 'text', text: '\n' });
+	assert.deepEqual(notePayload.bodyJson.content[2].content, [{ type: 'text', text: 'A link', marks: [] }, { type: 'text', text: ' (https://example.org/)' }, { type: 'text', text: '\n' }, { type: 'text', text: 'Next line' }]);
 	assert.deepEqual(notePayload.bodyJson.content[3], noteBody.content[3]);
 	assert.equal(JSON.stringify(noteBody), originalNote, 'Publishing must preserve the source document');
+	const linked = (text, href, marks = []) => ({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }, ...marks] });
+	const formattedLinks = { type: 'doc', content: [{ type: 'paragraph', content: [
+		linked('Bold', 'https://example.org/read?a=1&b=2', [{ type: 'strong' }]), linked(' and italic', 'https://example.org/read?a=1&b=2', [{ type: 'em' }]),
+		{ type: 'text', text: ' · ' }, linked('https://example.org/bare', 'https://example.org/bare'),
+		{ type: 'text', text: ' · ' }, linked('Email', 'mailto:hello@example.org'), { type: 'text', text: ' · ' }, linked('Section', '#section')
+	] }] };
+	const originalLinks = JSON.stringify(formattedLinks);
+	await publishNote('token', formattedLinks);
+	const convertedLinks = JSON.parse(requests.at(-1).body).bodyJson.content[0].content;
+	assert.equal(convertedLinks.map(node => node.text).join(''), 'Bold and italic (https://example.org/read?a=1&b=2) · https://example.org/bare · Email (mailto:hello@example.org) · Section (#section)');
+	assert.deepEqual(convertedLinks[0].marks, [{ type: 'bold' }]);
+	assert.deepEqual(convertedLinks[1].marks, [{ type: 'italic' }]);
+	assert.equal(convertedLinks.some(node => node.marks?.some(mark => mark.type === 'link')), false, 'Note hyperlinks become visible URLs, with one URL per formatted label');
+	assert.equal(JSON.stringify(formattedLinks), originalLinks, 'Keep the original Markdown-derived links for local content and other destinations');
 	const beforeEmptyNote = requests.length;
 	await assert.rejects(publishNote('token', { type: 'doc', content: [{ type: 'paragraph' }] }), /aucun texte/);
 	await assert.rejects(publishNote('token', { type: 'doc', content: Array.from({ length: 21 }, (_, index) => ({ type: 'image2', attrs: { src: `https://example.org/${index}.png` } })) }), /maximum 20/);

@@ -96,7 +96,7 @@ If an image cannot be found or uploaded, the plugin stops before creating the dr
 
 To publish an excerpt, select text in the editor and choose **To Substack** from its context menu. Only **Note** is offered, and only the selected text and its images are sent. Without a selection, the destination chooser offers Note and your newsletters.
 
-The title and opening italic paragraph remain in the Note's text. Headings become bold paragraphs; lists, quotes, links, and code retain their formatting. Images appear as gallery attachments, with a maximum of 20 unique images. Notes use Substack's own layout rather than inline image positions. Language edition settings apply to newsletter drafts.
+The title and opening italic paragraph remain in the Note's text. Headings become bold paragraphs; lists, quotes, and code retain their formatting. Markdown links such as `[label](https://example.org)` become `label (https://example.org)` when publishing a Note. Bare URLs are kept once, and the local Markdown stays unchanged. Images appear as gallery attachments, with a maximum of 20 unique images. Notes use Substack's own layout rather than inline image positions. Language edition settings apply to newsletter drafts.
 
 If the YAML has a non-empty `title`, it appears in bold at the top of the Note, before any image or body text. A matching level-one heading is not repeated. Publishing selected text ignores the YAML title.
 
