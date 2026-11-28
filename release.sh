@@ -13,7 +13,11 @@ BRANCH=$(jq -er '.defaultBranchRef.name' <<< "$REPOSITORY")
 npm ci --ignore-scripts --no-audit --no-fund
 npm run typecheck
 npm run lint
-npm run build
+if [[ -f private/index.ts ]]; then
+  ./build.sh
+else
+  npm run build
+fi
 
 git add .
 if ! git diff --cached --quiet; then

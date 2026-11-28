@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const { webcrypto, createHash } = require('node:crypto');
 const { runInNewContext } = require('node:vm');
 const { buildSync } = require('esbuild');
+const { readFileSync } = require('node:fs');
+const ts = require('typescript');
 
 module.exports = (async () => {
 	const requests = [];
@@ -54,12 +56,20 @@ module.exports = (async () => {
 	const link = 'https://substack.com/note/c-123';
 	const short = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A short note.' }] }] };
 	assert.equal(mastodonStatusText(short, 100, 23), 'A short note.');
+	assert.equal(mastodonStatusText(short, 100, 23, link), 'A short note.', 'Do not add a Substack footer when the complete text fits');
 	const long = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '😀 A long note. '.repeat(100) }] }] };
 	const shortened = mastodonStatusText(long, 100, 23);
 	assert.ok(shortened.endsWith('...'));
 	assert.equal(shortened.includes(link), false);
 	assert.ok(Array.from(shortened).length <= 100);
 	assert.equal(shortened.includes('\ufffd'), false);
+	const mastodonLength = text => Array.from(text.replace(/https?:\/\/[^\s]+/g, 'u'.repeat(23))).length;
+	const withFooter = mastodonStatusText(long, 100, 23, link);
+	assert.ok(withFooter.endsWith('...\n\n'+link), 'A shortened post must end with the complete Substack Note URL on its own line');
+	assert.ok(mastodonLength(withFooter) <= 100, 'Reserve room for the URL, separators and ellipsis before shortening');
+	assert.equal(withFooter.includes('\ufffd'), false);
+	const exactlyFits = { type: 'doc', content: [{ type: 'text', text: 'a'.repeat(100) }] };
+	assert.equal(mastodonStatusText(exactlyFits, 100, 23, link), 'a'.repeat(100));
 	const linked = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Read this', marks: [{ type: 'link', attrs: { href: 'https://example.org/article' } }] }] }] };
 	assert.ok(mastodonStatusText(linked, 200, 23).includes('https://example.org/article'));
 	const articleLink = 'https://example.org/article';
@@ -68,6 +78,14 @@ module.exports = (async () => {
 	const rawLinks = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Long note. '.repeat(100) + articleLink + '\nhttps://example.org/second' }] }] };
 	const preserved = mastodonStatusText(rawLinks, 100, 23);
 	assert.ok(preserved.endsWith('...\n\n' + articleLink + '\nhttps://example.org/second'), 'Keep every original link');
+	const preservedWithFooter = mastodonStatusText(rawLinks, 100, 23, link);
+	assert.ok(preservedWithFooter.endsWith(articleLink+'\nhttps://example.org/second\n'+link), 'Keep original links and place the Substack Note last');
+	assert.ok(mastodonLength(preservedWithFooter) <= 100);
+	const alreadyLinked = { type: 'doc', content: [{ type: 'text', text: 'Long note. '.repeat(100)+link+'.' }] };
+	const deduplicated = mastodonStatusText(alreadyLinked, 100, 23, link);
+	assert.equal(deduplicated.split(link).length-1, 1, 'Do not duplicate a Substack URL already present, including trailing punctuation');
+	assert.ok(deduplicated.endsWith('\n'+link));
+	assert.ok(mastodonLength(deduplicated) <= 100);
 	assert.equal(mastodonStatusText({ type: 'doc', content: [{ type: 'text', text: articleLink }] }, 23, 23), articleLink, 'Count links using the server reservation');
 	assert.throws(() => mastodonStatusText(rawLinks, 40, 23), /links/i, 'Fail instead of silently dropping links that cannot fit');
 	const adjacent = { type: 'doc', content: [{ type: 'paragraph', content: [...linked.content[0].content, { type: 'text', text: 'Next sentence. '.repeat(50) }] }] };
@@ -89,8 +107,8 @@ module.exports = (async () => {
 		assert.equal(request.url, 'https://mastodon.example/api/v1/statuses');
 		assert.equal(request.headers['Idempotency-Key'], 'to-substack-note-123');
 		const payload = JSON.parse(request.body);
-		assert.ok(payload.status.endsWith('...'));
-		assert.equal(payload.status.includes(link), false);
+		assert.ok(payload.status.endsWith('...\n\n'+link));
+		assert.ok(mastodonLength(payload.status) <= configuration.statuses.max_characters);
 		assert.deepEqual(payload.media_ids, ['42']);
 		return { status: 200, json: { id: '1234', url: 'https://mastodon.example/@writer/1234' } };
 	};
@@ -121,5 +139,84 @@ module.exports = (async () => {
 	await revokeMastodonSession(session);
 	assert.equal(requests.at(-1).url, 'https://mastodon.example/oauth/revoke');
 	assert.equal(JSON.parse(requests.at(-1).body).token, 'fixture-access-token');
+	assert.throws(() => parseMastodonSession('invalid'), error => error.reconnect === true);
+	const buttons = [];
+	class Element {
+		constructor() { this.children = []; this.hidden = false; this.isConnected = true; }
+		createEl(tag, options = {}) { const element = new Element(); element.tag = tag; element.text = options.text; this.children.push(element); return element; }
+		setText(value) { this.text = value; }
+		setAttribute() {}
+	}
+	class Modal {
+		constructor(app) { this.app = app; this.contentEl = new Element(); this.modalEl = new Element(); }
+	}
+	class Setting {
+		constructor(container) { this.settingEl = container.createEl('div'); }
+		addButton(callback) {
+			const button = { setButtonText(text) { this.text = text; return this; }, setDisabled(value) { this.disabled = value; return this; }, onClick(callback) { this.callback = callback; return this; } };
+			callback(button); buttons.push(button); return this;
+		}
+	}
+	const postModule = { exports: {} };
+	runInNewContext(ts.transpileModule(readFileSync('plugin/post.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2018 } }).outputText, {
+		module: postModule, exports: postModule.exports, require: name => {
+			if (name === 'obsidian') return { Modal, Setting };
+			if (name === './mastodon') return mod.exports;
+			if (name === './i18n') return { t: key => key };
+			if (name === './images') return {};
+			assert.equal(name, './substack');
+			return { publishNote: () => { throw Error('Never republish on Substack during Mastodon recovery'); } };
+		}
+	});
+	const { PostModal } = postModule.exports;
+	for (const failure of ['missing', 'invalid', '401-instance', '403-instance', '401-status', '403-status']) {
+		buttons.length = 0;
+		let stored = failure === 'missing' ? null : session, pendingAuthorization = false, reconnected = false, signIns = 0;
+		const plugin = { app: {}, settings: { mastodonSecretId: 'fixture-secret' }, mastodonAccount: failure === 'missing' ? '' : session.account, mastodonError: '', mastodonBusy: false,
+			get hasMastodonLogin() { return pendingAuthorization; },
+			getMastodonSession: () => failure === 'invalid' && !reconnected ? parseMastodonSession('invalid') : stored,
+			connectMastodon: async () => { signIns++; pendingAuthorization = true; plugin.mastodonError = ''; }
+		};
+		respond = request => {
+			const isInstance = request.url.endsWith('/api/v2/instance');
+			if (!reconnected && failure.endsWith(isInstance ? '-instance' : '-status')) return { status: Number(failure.slice(0,3)) };
+			return { status: 200, json: isInstance ? { configuration } : { id: '1234', url: 'https://mastodon.example/@writer/1234' } };
+		};
+		const modal = new PostModal(plugin, {});
+		await modal.mirrorNote(short, link);
+		const row = modal.contentEl.children.find(element => element.tag === 'div');
+		assert.equal(row.hidden, false, 'Offer reconnection for '+failure);
+		assert.equal(plugin.mastodonAccount, '');
+		const reconnect = buttons.find(button => button.text === 'reconnectMastodon');
+		const resume = buttons.find(button => button.text === 'publishMastodon');
+		await reconnect.callback();
+		assert.equal(signIns, 1);
+		const whileAuthorizing = requests.length;
+		await resume.callback();
+		assert.equal(requests.length, whileAuthorizing, 'Wait for browser authorization before trying to send');
+		stored = session; pendingAuthorization = false; reconnected = true; plugin.mastodonAccount = session.account;
+		const beforeResume = requests.length;
+		await Promise.all([resume.callback(), resume.callback()]);
+		await resume.callback();
+		assert.equal(requests.slice(beforeResume).filter(request => request.url.endsWith('/api/v1/statuses')).length, 1, 'Resume the Mastodon copy once, never the Substack publication');
+		assert.equal(row.hidden, true);
+		assert.ok(modal.contentEl.children.some(element => element.tag === 'a' && element.text === 'openMastodonPost'));
+	}
+	buttons.length = 0;
+	const uncertainPlugin = { app: {}, settings: { mastodonSecretId: 'fixture-secret' }, mastodonAccount: session.account, getMastodonSession: () => session,
+		connectMastodon: () => { throw Error('No reconnection for an uncertain post'); } };
+	respond = request => ({ status: request.url.endsWith('/api/v2/instance') ? 200 : 500, json: { configuration } });
+	const uncertainModal = new PostModal(uncertainPlugin, {}), beforeUncertain = requests.length;
+	await uncertainModal.mirrorNote(short, link);
+	assert.equal(uncertainModal.contentEl.children.find(element => element.tag === 'div').hidden, true, 'An uncertain post must not offer a blind retry');
+	for (const button of buttons) await button.callback();
+	assert.equal(requests.slice(beforeUncertain).filter(request => request.url.endsWith('/api/v1/statuses')).length, 1);
+	buttons.length = 0;
+	const disconnected = new PostModal({ ...uncertainPlugin, settings: { mastodonSecretId: '' }, mastodonAccount: '' }, {});
+	const beforeDisconnected = requests.length;
+	await disconnected.mirrorNote(short, link);
+	assert.equal(requests.length, beforeDisconnected, 'Respect an intentional disconnection');
+	assert.equal(buttons.length, 0);
 	console.log('Mastodon: OAuth state and PKCE, origin binding, truncation preserving original links, media, limits and no duplicate posts pass.');
+	console.log('Mastodon recovery: missing/invalid secrets, HTTP 401/403, browser authorization, single Mastodon-only resume and uncertain-publication protection pass.');
 })();

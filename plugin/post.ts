@@ -145,7 +145,7 @@ export class PostModal extends Modal {
 		let submit: ButtonComponent;
 		const description = this.contentEl.createEl('p');
 		const updateDescription = (): void => {
-			const mirror = !!this.plugin.mastodonAccount;
+			const mirror = !!this.plugin.mastodonAccount || !!this.plugin.settings.mastodonSecretId;
 			description.setText(this.selectedMarkdown !== undefined ? t(mirror ? 'publishSelectedTextBoth' : 'publishSelectedText') : t(selected === NOTE_DESTINATION ? mirror ? 'publishNoteBoth' : 'publishNoteFromNote' : 'createDraftFromNote', { note: this.file.basename }));
 		};
 		updateDescription();
@@ -177,19 +177,7 @@ export class PostModal extends Modal {
 						this.contentEl.empty();
 						this.contentEl.createEl('p', { text: t('notePublished') });
 						this.contentEl.createEl('a', { text: t('openNote'), href: url, attr: { target: '_blank', rel: 'noopener' } });
-						if (this.plugin.mastodonAccount) {
-							const mastodonStatus = this.contentEl.createEl('p', { text: t('publishingMastodon'), attr: { role: 'status', 'aria-live': 'polite' } });
-							try {
-								const mastodon = this.plugin.getMastodonSession();
-								if (!mastodon) throw new MastodonError(t('mastodonSessionExpired'));
-								const mastodonUrl = await publishMastodonNote(mastodon, post.body, url);
-								mastodonStatus.setText(t('mastodonPublished'));
-								this.contentEl.createEl('a', { text: t('openMastodonPost'), href: mastodonUrl, attr: { target: '_blank', rel: 'noopener' } });
-							} catch (error) {
-								mastodonStatus.setAttribute('role', 'alert');
-								mastodonStatus.setText(error instanceof MastodonError ? error.message : t('mastodonPublicationUncertain'));
-							}
-						}
+						await this.mirrorNote(post.body, url);
 						return;
 					}
 					if (!newsletter) throw new SubstackError(t('invalidNewsletter'));
@@ -215,6 +203,56 @@ export class PostModal extends Modal {
 				}
 			});
 		});
+	}
+
+	private async mirrorNote(body: PostNode, sourceUrl: string): Promise<void> {
+		if (!this.plugin.settings.mastodonSecretId && !this.plugin.mastodonAccount) return;
+		const status = this.contentEl.createEl('p', { text: t('publishingMastodon'), attr: { role: 'status', 'aria-live': 'polite' } });
+		const actions = new Setting(this.contentEl);
+		actions.settingEl.hidden = true;
+		let busy = false;
+		let finished = false;
+		const publish = async (): Promise<void> => {
+			if (busy || finished || !this.modalEl.isConnected) return;
+			if (this.plugin.hasMastodonLogin || this.plugin.mastodonBusy) {
+				status.setText(t('mastodonReconnectThenPublish'));
+				actions.settingEl.hidden = false;
+				return;
+			}
+			busy = true;
+			actions.settingEl.hidden = true;
+			status.setAttribute('role', 'status');
+			status.setText(t('publishingMastodon'));
+			try {
+				const session = this.plugin.getMastodonSession();
+				if (!session) throw new MastodonError(t('mastodonSessionExpired'), true);
+				const url = await publishMastodonNote(session, body, sourceUrl);
+				finished = true;
+				status.setText(t('mastodonPublished'));
+				this.contentEl.createEl('a', { text: t('openMastodonPost'), href: url, attr: { target: '_blank', rel: 'noopener' } });
+			} catch (error) {
+				status.setAttribute('role', 'alert');
+				status.setText(error instanceof MastodonError ? error.message : t('mastodonPublicationUncertain'));
+				if (error instanceof MastodonError && error.reconnect) {
+					this.plugin.mastodonAccount = '';
+					this.plugin.mastodonError = error.message;
+					actions.settingEl.hidden = false;
+				} else { finished = true; }
+			} finally { busy = false; }
+		};
+		actions.addButton(button => button.setButtonText(t('reconnectMastodon')).onClick(async () => {
+			if (busy || finished || !this.modalEl.isConnected) return;
+			button.setDisabled(true);
+			try {
+				await this.plugin.connectMastodon();
+				status.setText(this.plugin.mastodonError || t('mastodonReconnectThenPublish'));
+			} catch (error) {
+				status.setAttribute('role', 'alert');
+				status.setText(error instanceof MastodonError ? error.message : t('mastodonConnectionFailed'));
+			} finally { button.setDisabled(false); }
+		}));
+		actions.addButton(button => button.setButtonText(t('publishMastodon')).onClick(publish));
+		await publish();
 	}
 
 	private async showPublicationControls(session: string, newsletter: Newsletter, draftId: string, title: string): Promise<void> {

@@ -1,6 +1,6 @@
 # To Substack
 
-Publish an Obsidian note as a newsletter article or a Substack Note. Your local file stays unchanged.
+Publish an Obsidian note as a newsletter article or a Substack Note.
 
 ## Install and connect
 
@@ -84,7 +84,7 @@ Images are resized to **1,600 px maximum width** and encoded only when sent to S
 
 - **Language editions**: choose a default language and additional editions. Enable additional languages and automatic translation in Substack too. The plugin waits for the selected editions before offering the draft actions.
 - **Remove trailing tags**: removes paragraphs containing only hashtags at the end of the export. Off by default.
-- **Mastodon account**: enter your server and sign in. While connected, each published Substack Note is also posted to Mastodon. Long text is shortened, preserving its original links. Newsletter articles are not mirrored. If Mastodon fails, the Substack Note remains published.
+- **Mastodon account**: enter your server and sign in. While connected, each published Substack Note is also posted to Mastodon. If the text is too long, it is shortened to leave room for its original links and a link to the complete Substack Note at the end. Text that fits is posted in full. Newsletter articles are not mirrored. If the connection expires, choose **Reconnect Mastodon**, authorize in your browser, then **Publish on Mastodon** to finish the copy. The Substack Note is already published and is not sent again. If publication is uncertain, check Mastodon before retrying.
 
 ## Connection, privacy and limits
 

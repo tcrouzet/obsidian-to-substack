@@ -23,7 +23,9 @@ export interface MastodonLogin {
 	authorizationUrl: string;
 }
 
-export class MastodonError extends Error {}
+export class MastodonError extends Error {
+	constructor(message: string, readonly reconnect = false) { super(message); }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -43,7 +45,7 @@ export function normalizeMastodonServer(value: string): string {
 
 async function request(server: string, path: string, options: Omit<RequestUrlParam, 'url'> = {}, token?: string, timeoutMs = 15000): Promise<RequestUrlResponse> {
 	const origin = normalizeMastodonServer(server);
-	if (token !== undefined && !isSecret(token)) throw new MastodonError(t('mastodonSessionExpired'));
+	if (token !== undefined && !isSecret(token)) throw new MastodonError(t('mastodonSessionExpired'), true);
 	let timeout: number | undefined;
 	const uncertain = path === '/api/v1/statuses' && options.method === 'POST';
 	try {
@@ -53,7 +55,7 @@ async function request(server: string, path: string, options: Omit<RequestUrlPar
 		}), new Promise<never>((_resolve, reject) => {
 			timeout = window.setTimeout(() => reject(new MastodonError(t(uncertain ? 'mastodonPublicationUncertain' : 'mastodonConnectionFailed'))), timeoutMs);
 		})]);
-		if (response.status === 401 || response.status === 403) throw new MastodonError(t('mastodonSessionExpired'));
+		if (response.status === 401 || response.status === 403) throw new MastodonError(t('mastodonSessionExpired'), true);
 		if (response.status < 200 || response.status >= 300) throw new MastodonError(t(uncertain ? 'mastodonPublicationUncertain' : 'mastodonConnectionFailed'));
 		return response;
 	} catch (error) {
@@ -105,14 +107,14 @@ export function parseMastodonSession(value: string): MastodonSession {
 		const session: unknown = JSON.parse(value);
 		if (!isRecord(session) || typeof session.server !== 'string' || !isSecret(session.accessToken) || !isSecret(session.clientId) || !isSecret(session.clientSecret) || typeof session.account !== 'string' || !session.account) throw new Error();
 		return { server: normalizeMastodonServer(session.server), accessToken: session.accessToken, clientId: session.clientId, clientSecret: session.clientSecret, account: session.account };
-	} catch { throw new MastodonError(t('mastodonSessionExpired')); }
+	} catch { throw new MastodonError(t('mastodonSessionExpired'), true); }
 }
 
 export async function revokeMastodonSession(session: MastodonSession): Promise<void> {
 	await request(session.server, '/oauth/revoke', { method: 'POST', body: JSON.stringify({ client_id: session.clientId, client_secret: session.clientSecret, token: session.accessToken }) });
 }
 
-export function mastodonStatusText(body: PostNode, maxCharacters: number, reservedPerUrl: number): string {
+export function mastodonStatusText(body: PostNode, maxCharacters: number, reservedPerUrl: number, sourceUrl?: string): string {
 	const plain = (node: PostNode): string => {
 		if (node.type === 'image2') return '';
 		if (node.type === 'hardBreak') return '\n';
@@ -128,7 +130,8 @@ export function mastodonStatusText(body: PostNode, maxCharacters: number, reserv
 	const isUrl = (token: string): boolean => /^(?:https?:\/\/|www\.)/.test(token);
 	const cost = (token: string): number => isUrl(token) ? reservedPerUrl + (token.match(/[.,;:!?)\]}>"']+$/)?.[0].length || 0) : 1;
 	if (tokens.reduce((sum, token) => sum + cost(token), 0) <= maxCharacters) return text;
-	const links = [...new Set(tokens.filter(isUrl))];
+	const links = [...new Set(tokens.filter(isUrl))].filter(url => url.replace(/[.,;:!?)\]}>"']+$/, '') !== sourceUrl);
+	if (sourceUrl) links.push(sourceUrl);
 	const suffix = links.length ? `\n\n${links.join('\n')}` : '';
 	const budget = maxCharacters - links.reduce((sum, url) => sum + cost(url), 0) - (links.length ? links.length + 1 : 0) - 3;
 	if (budget < 0) throw new MastodonError(t('mastodonTooManyLinks'));
@@ -150,7 +153,7 @@ export async function publishMastodonNote(session: MastodonSession, body: PostNo
 	const statuses = configuration && isRecord(configuration.statuses) ? configuration.statuses : null;
 	const media = configuration && isRecord(configuration.media_attachments) ? configuration.media_attachments : null;
 	if (!statuses || !media || typeof statuses.max_characters !== 'number' || !Number.isSafeInteger(statuses.max_characters) || statuses.max_characters <= 0 || typeof statuses.max_media_attachments !== 'number' || !Number.isSafeInteger(statuses.max_media_attachments) || statuses.max_media_attachments < 0 || typeof statuses.characters_reserved_per_url !== 'number' || !Number.isSafeInteger(statuses.characters_reserved_per_url) || statuses.characters_reserved_per_url < 0 || typeof media.image_size_limit !== 'number' || !Number.isSafeInteger(media.image_size_limit) || media.image_size_limit <= 0 || !Array.isArray(media.supported_mime_types) || !media.supported_mime_types.every(mime => typeof mime === 'string')) throw new MastodonError(t('mastodonInstanceUnsupported'));
-	const status = mastodonStatusText(body, statuses.max_characters, statuses.characters_reserved_per_url);
+	const status = mastodonStatusText(body, statuses.max_characters, statuses.characters_reserved_per_url, sourceUrl);
 	const images = new Map<string, string>();
 	const collect = (node: PostNode): void => {
 		if (node.type === 'image2' && typeof node.attrs?.src === 'string' && !images.has(node.attrs.src)) images.set(node.attrs.src, typeof node.attrs.alt === 'string' ? node.attrs.alt : '');
